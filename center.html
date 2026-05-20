@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>3 Point Center Calculator</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="site-nav-link" href="index.html">Trade Stations</a>
+        <a class="site-nav-link" href="atlas.html">Star System Navigator</a>
+        <a class="site-nav-link active" href="center.html">3 Point Center</a>
+      </nav>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Coordinate tools</p>
+          <h1>3 Point Center Calculator</h1>
+          <p class="lede">Paste three Space Engineers GPS coordinates to calculate their center point and view the triangle on the shared star-system map.</p>
+        </div>
+      </section>
+
+      <section class="map-panel">
+        <div class="section-heading">
+          <h2>3D Map</h2>
+          <button class="ghost" id="resetCenterMapButton" type="button">Reset View</button>
+        </div>
+        <div class="map-layout">
+          <div class="map-viewport" id="centerMapViewport">
+            <div class="map-fallback" id="centerMapFallback">Loading map...</div>
+          </div>
+          <div class="map-list" id="centerMapList"></div>
+        </div>
+      </section>
+
+      <section class="atlas-grid">
+        <form class="submit-panel" id="centerForm">
+          <h2>Center Input</h2>
+          <label for="centerInput">Three GPS coordinates</label>
+          <textarea id="centerInput" rows="8" placeholder="GPS:Point A:0:0:0:#FFFFFFFF:&#10;GPS:Point B:1000:0:0:#FFFFFFFF:&#10;GPS:Point C:0:1000:0:#FFFFFFFF:"></textarea>
+
+          <div class="actions">
+            <button type="submit">Calculate Center</button>
+            <button class="secondary" id="sampleCenterButton" type="button">Use Sample</button>
+          </div>
+          <div class="preview" id="centerSummary">Paste exactly three GPS coordinates.</div>
+        </form>
+
+        <section class="results-panel atlas-points-panel">
+          <div class="section-heading">
+            <h2>Result</h2>
+            <button class="ghost" id="copyCenterButton" type="button">Copy Center</button>
+          </div>
+          <div class="results" id="centerResultList">
+            <div class="empty">No center calculated yet.</div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="center.js"></script>
+  </body>
+</html>

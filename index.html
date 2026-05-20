@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SAC Server Trade Station Index</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="site-nav-link active" href="index.html">Trade Stations</a>
+        <a class="site-nav-link" href="atlas.html">Star System Navigator</a>
+        <a class="site-nav-link" href="center.html">3 Point Center</a>
+      </nav>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Server coordinate registry</p>
+          <h1>SAC Server Trade Station Index</h1>
+          <p class="lede">Submit a Space Engineers GPS string, auto-detect the nearest planet or moon, and keep duplicate locations out of the list.</p>
+        </div>
+        <div class="hero-side">
+          <div class="status-panel">
+            <span class="status-dot" id="storageDot"></span>
+            <div>
+              <strong id="storageMode">Local demo mode</strong>
+              <span id="storageDetail">Connect Supabase to share entries online.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <form class="submit-panel" id="coordinateForm">
+          <label for="gpsInput">Coordinate GPS string(s)</label>
+          <textarea id="gpsInput" name="gpsInput" rows="7" placeholder="GPS:Hollis Launchway:9674.61475777626:142623.007626683:-111462.180489533:#FF75C9F1:&#10;GPS:SMSB Trade Station:12345:67890:-12345:#FFFFFFFF:" required></textarea>
+
+          <div class="field-grid">
+            <label>
+              Notes
+              <input id="notesInput" name="notesInput" type="text" placeholder="Optional description">
+            </label>
+            <label>
+              Submitted by
+              <input id="submitterInput" name="submitterInput" type="text" placeholder="Optional name">
+            </label>
+          </div>
+
+          <div class="preview" id="previewBox">
+            Paste a GPS coordinate to preview detection.
+          </div>
+
+          <div class="actions">
+            <button type="submit">Submit coordinate(s)</button>
+            <button class="secondary" id="sampleButton" type="button">Use sample</button>
+          </div>
+          <p class="message" id="formMessage" role="status"></p>
+        </form>
+
+      </section>
+
+      <section class="map-panel">
+        <div class="section-heading">
+          <h2>3D Map</h2>
+          <button class="ghost" id="resetMapButton" type="button">Reset View</button>
+        </div>
+        <div class="map-layout">
+          <div class="map-viewport" id="mapViewport">
+            <div class="map-fallback" id="mapFallback">Loading map...</div>
+          </div>
+          <div class="map-list" id="mapList"></div>
+        </div>
+      </section>
+
+      <section class="results-panel">
+        <div class="section-heading">
+          <h2>Coordinates</h2>
+          <div class="section-actions">
+            <button class="ghost" id="resetFiltersButton" type="button">Reset Filters</button>
+            <button class="ghost" id="refreshButton" type="button">Refresh</button>
+          </div>
+        </div>
+
+        <div class="coordinate-tools">
+          <label for="searchInput">Search</label>
+          <input id="searchInput" type="search" placeholder="Name, planet, notes, submitter">
+
+          <div class="filter-grid">
+            <label>
+              Planet
+              <select id="planetFilter">
+                <option value="all">All planets</option>
+              </select>
+            </label>
+            <label>
+              Location
+              <select id="typeFilter">
+                <option value="all">All types</option>
+                <option value="surface">Surface</option>
+                <option value="orbital">Orbital</option>
+                <option value="deep_space">Deep space</option>
+              </select>
+            </label>
+            <label>
+              Looking for
+              <select id="tradeFilter">
+                <option value="all">Anything</option>
+                <option value="ships">Ships or rovers</option>
+                <option value="ore">Ore or raw materials</option>
+                <option value="components">Components or general goods</option>
+                <option value="weapons">Weapons or ammo</option>
+                <option value="zone_chips">Possible zone chips</option>
+                <option value="unknown">Unknown or special factions</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="stats">
+            <div>
+              <strong id="totalCount">0</strong>
+              <span>stored</span>
+            </div>
+            <div>
+              <strong id="surfaceCount">0</strong>
+              <span>surface</span>
+            </div>
+            <div>
+              <strong id="orbitalCount">0</strong>
+              <span>orbital</span>
+            </div>
+            <div>
+              <strong id="deepSpaceCount">0</strong>
+              <span>deep space</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="results" id="resultsList"></div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

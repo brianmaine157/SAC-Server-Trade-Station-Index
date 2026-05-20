@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Star System Navigator</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="site-nav-link" href="index.html">Trade Stations</a>
+        <a class="site-nav-link active" href="atlas.html">Star System Navigator</a>
+        <a class="site-nav-link" href="center.html">3 Point Center</a>
+      </nav>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Navigation tools</p>
+          <h1>Star System Navigator</h1>
+          <p class="lede">Reference points, planet map, and travel-time planning for GPS routes through the default star system.</p>
+        </div>
+      </section>
+
+      <section class="map-panel">
+        <div class="section-heading">
+          <h2>3D Map</h2>
+          <button class="ghost" id="resetAtlasMapButton" type="button">Reset View</button>
+        </div>
+        <div class="map-layout">
+          <div class="map-viewport" id="atlasMapViewport">
+            <div class="map-fallback" id="atlasMapFallback">Loading map...</div>
+          </div>
+          <div class="map-list" id="atlasMapList"></div>
+        </div>
+      </section>
+
+      <section class="atlas-grid">
+        <form class="submit-panel" id="routeForm">
+          <h2>Waypoint Calculator</h2>
+          <label for="routeInput">GPS route</label>
+          <textarea id="routeInput" rows="8" placeholder="GPS:Start:0:0:0:#FFFFFFFF:&#10;GPS:Stop:100000:0:0:#FFFFFFFF:"></textarea>
+
+          <div class="field-grid">
+            <label>
+              Velocity, m/s
+              <input id="velocityInput" type="number" min="1" step="1" value="100">
+            </label>
+            <label>
+              Trip
+              <select id="tripModeInput">
+                <option value="1">One way</option>
+                <option value="2">Two way</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Calculate Route</button>
+            <button class="secondary" id="clearRouteButton" type="button">Clear Route</button>
+          </div>
+          <div class="preview" id="routeSummary">Paste two or more GPS coordinates to calculate travel time.</div>
+        </form>
+
+        <section class="results-panel atlas-points-panel">
+          <div class="section-heading">
+            <h2>Planet Jump Coords</h2>
+            <button class="ghost" id="copyAllAtlasPointsButton" type="button">Copy All</button>
+          </div>
+          <div class="coordinate-tools">
+            <div class="filter-grid">
+              <label>
+                Planet
+                <select id="atlasPlanetFilter">
+                  <option value="all">All planets</option>
+                </select>
+              </label>
+              <label>
+                Direction
+                <select id="atlasDirectionFilter">
+                  <option value="all">All directions</option>
+                  <option value="X+">X+</option>
+                  <option value="X-">X-</option>
+                  <option value="Y+">Y+</option>
+                  <option value="Y-">Y-</option>
+                  <option value="Z+">Z+</option>
+                  <option value="Z-">Z-</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="results atlas-point-list" id="atlasPointList"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="atlas.js"></script>
+  </body>
+</html>

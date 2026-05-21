@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NPC Faction Index</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="site-nav-link" href="index.html">Trade Station Index</a>
+        <a class="site-nav-link active" href="factions.html">NPC Faction Index</a>
+        <a class="site-nav-link" href="atlas.html">Star System Navigator</a>
+        <a class="site-nav-link" href="center.html">3 Point Center</a>
+      </nav>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Faction registry</p>
+          <h1>NPC Faction Index</h1>
+          <p class="lede">Track faction tags, names, specialties, trades, and discovered NPC factions on the SAC server.</p>
+        </div>
+        <div class="hero-side">
+          <button id="addFactionButton" type="button">Add Faction</button>
+          <button class="ghost subtle-admin-button" id="factionAdminModeButton" type="button">Admin Mode</button>
+          <button class="ghost subtle-admin-button" id="factionExitAdminModeButton" type="button" hidden>Exit Admin</button>
+        </div>
+      </section>
+
+      <section class="results-panel">
+        <div class="section-heading">
+          <h2>Faction Lookup</h2>
+          <div class="section-actions">
+            <button class="ghost" id="resetFactionFiltersButton" type="button">Reset Filters</button>
+          </div>
+        </div>
+
+        <div class="coordinate-tools">
+          <label for="factionSearchInput">Search</label>
+          <input id="factionSearchInput" type="search" placeholder="Tag, name, specialty, or trade">
+          <div class="filter-grid">
+            <label>
+              Specialty
+              <select id="factionTypeFilter">
+                <option value="all">All specialties</option>
+              </select>
+            </label>
+            <label>
+              Source
+              <select id="factionSourceFilter">
+                <option value="all">All sources</option>
+                <option value="custom">Discovered</option>
+                <option value="built-in">Undiscovered</option>
+              </select>
+            </label>
+            <div class="stats compact-stats">
+              <div>
+                <strong id="factionCount">0</strong>
+                <span>listed</span>
+              </div>
+            </div>
+          </div>
+          <p class="message" id="factionPageMessage" role="status"></p>
+        </div>
+
+        <div class="faction-columns">
+          <section>
+            <div class="section-heading compact-heading">
+              <h2>Discovered Factions</h2>
+              <span class="pill" id="discoveredCount">0 listed</span>
+            </div>
+            <div class="results faction-results" id="discoveredFactionList"></div>
+          </section>
+          <section>
+            <div class="section-heading compact-heading">
+              <h2>Undiscovered Factions</h2>
+              <span class="pill" id="undiscoveredCount">0 possible</span>
+            </div>
+            <div class="results faction-results" id="undiscoveredFactionList"></div>
+          </section>
+        </div>
+      </section>
+
+      <div class="modal-backdrop" id="adminFactionModal" hidden>
+        <form class="admin-modal" id="adminFactionForm">
+          <div class="section-heading">
+            <h2 id="adminFactionTitle">Faction</h2>
+            <button class="ghost" id="adminFactionCancelButton" type="button">Cancel</button>
+          </div>
+          <label id="adminFactionPasswordLabel">
+            Admin password
+            <input id="adminFactionPasswordInput" type="password" inputmode="numeric" autocomplete="off" required>
+          </label>
+          <div id="adminFactionFields">
+            <label class="wide-field">
+              Faction name
+              <input id="adminFactionNameInput" type="text" required>
+            </label>
+            <div class="field-grid">
+              <label>
+                Faction tag
+                <input id="adminFactionTagInput" type="text" maxlength="4" required>
+              </label>
+              <label>
+                Specialty
+                <select id="adminFactionTypeInput" required></select>
+              </label>
+            </div>
+            <label class="wide-field" id="customFactionTypeField" hidden>
+              Custom specialty
+              <input id="customFactionTypeInput" type="text" placeholder="Example: Salvager">
+            </label>
+            <label class="wide-field">
+              Trade
+              <select id="adminFactionTradeInput" required></select>
+            </label>
+            <label class="wide-field" id="customFactionTradeField" hidden>
+              Custom trade
+              <input id="customFactionTradeInput" type="text" placeholder="Example: Scrap">
+            </label>
+          </div>
+          <p class="message" id="adminFactionMessage"></p>
+          <div class="actions">
+            <button id="adminFactionConfirmButton" type="submit">Save Faction</button>
+          </div>
+        </form>
+      </div>
+    </main>
+
+    <script src="factions.js"></script>
+  </body>
+</html>

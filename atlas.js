@@ -120,7 +120,7 @@ function escapeHtml(value) {
 function buildAtlasPoints() {
   atlasPoints = [];
   for (const planet of PLANETS) {
-    const exitDistance = planet.radius + planet.atmosphereHeight + EXIT_OFFSET_M;
+    const exitDistance = planet.radius * GRAVITY_FIELD_RADIUS_MULTIPLIER + EXIT_OFFSET_M;
     for (const direction of DIRECTIONS) {
       const point = {
         id: `${planet.name}-${direction.label}`,
@@ -131,9 +131,7 @@ function buildAtlasPoints() {
         y: planet.y + direction.y * exitDistance,
         z: planet.z + direction.z * exitDistance,
         exitDistance,
-        note: planet.atmosphereHeight > 0
-          ? "1 km outside atmosphere"
-          : "No atmosphere: 1 km above surface"
+        note: "1 km outside natural gravity SOI"
       };
       point.rawText = makeGps(point.name, point);
       atlasPoints.push(point);

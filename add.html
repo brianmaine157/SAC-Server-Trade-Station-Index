@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Add Trade Stations</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="site-nav-link" href="index.html">Trade Station Index</a>
+        <a class="site-nav-link" href="factions.html">NPC Faction Index</a>
+        <a class="site-nav-link" href="atlas.html">Star System Navigator</a>
+        <a class="site-nav-link" href="center.html">3 Point Center</a>
+      </nav>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Station submission</p>
+          <h1>Add Trade Stations</h1>
+          <p class="lede">Paste one or more Space Engineers GPS strings. The app auto-detects planet, location type, faction details, and duplicate stations within 1 km.</p>
+        </div>
+        <div class="hero-side">
+          <div class="status-panel">
+            <span class="status-dot" id="storageDot"></span>
+            <div>
+              <strong id="storageMode">Local demo mode</strong>
+              <span id="storageDetail">Connect Supabase to share entries online.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <form class="submit-panel" id="coordinateForm">
+          <label for="gpsInput">Coordinate GPS string(s)</label>
+          <textarea id="gpsInput" name="gpsInput" rows="9" placeholder="GPS:Hollis Launchway:9674.61475777626:142623.007626683:-111462.180489533:#FF75C9F1:&#10;GPS:SMSB Trade Station:12345:67890:-12345:#FFFFFFFF:" required></textarea>
+
+          <div class="field-grid">
+            <label>
+              Notes
+              <input id="notesInput" name="notesInput" type="text" placeholder="Optional description applied to all">
+            </label>
+            <label>
+              Submitted by
+              <input id="submitterInput" name="submitterInput" type="text" placeholder="Your name" required>
+            </label>
+          </div>
+
+          <div class="preview" id="previewBox">
+            Paste one or more GPS coordinates to preview detection.
+          </div>
+          <div class="zone-preview" id="zoneChipList"></div>
+
+          <div class="actions">
+            <button type="submit">Submit coordinate(s)</button>
+            <button class="secondary" id="sampleButton" type="button">Use sample</button>
+          </div>
+          <p class="message" id="formMessage" role="status"></p>
+        </form>
+      </section>
+
+      <div class="modal-backdrop" id="factionModal" hidden>
+        <form class="admin-modal" id="factionForm">
+          <div class="section-heading">
+            <h2 id="factionTitle">New NPC Faction</h2>
+            <button class="ghost" id="factionCancelButton" type="button">Cancel</button>
+          </div>
+          <p class="message" id="factionIntro"></p>
+          <p class="message" id="factionProgress"></p>
+          <div class="field-grid">
+            <label>
+              Faction tag
+            <input id="factionTagInput" type="text" maxlength="4" readonly>
+            </label>
+            <label>
+              Type
+              <select id="factionTypeInput" required>
+                <option value="Builder">Builder</option>
+                <option value="Miner">Miner</option>
+                <option value="Trader">Trader</option>
+                <option value="Pirate">Pirate</option>
+                <option value="Hostile NPC">Hostile NPC</option>
+                <option value="Scenario">Scenario</option>
+                <option value="Unknown">Unknown</option>
+              </select>
+            </label>
+          </div>
+          <label class="wide-field">
+            Faction name
+            <input id="factionNameInput" type="text" required>
+          </label>
+          <div class="actions">
+            <button type="submit">Save Faction</button>
+          </div>
+          <p class="message" id="factionMessage"></p>
+        </form>
+      </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
+    <script src="add.js"></script>
+  </body>
+</html>

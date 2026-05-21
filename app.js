@@ -1,9 +1,12 @@
 const DUPLICATE_DISTANCE_M = 1000;
+const ADMIN_PASSWORD = "6846";
 const SURFACE_ALTITUDE_M = 5000;
 const ORBITAL_ALTITUDE_M = 150000;
 const LOCAL_STORAGE_KEY = "se-coordinate-registry";
 const LOCAL_STORAGE_VERSION_KEY = "se-coordinate-registry-version";
 const LOCAL_STORAGE_VERSION = "2026-05-faction-derived-reset";
+const LOCAL_FACTIONS_KEY = "se-npc-factions";
+const LOCAL_COMMENTS_KEY = "se-station-comments";
 const SAMPLE_GPS = "GPS:Hollis Launchway:9674.61475777626:142623.007626683:-111462.180489533:#FF75C9F1:";
 const MAP_SCALE = 1 / 25000;
 const GRAVITY_FIELD_RADIUS_MULTIPLIER = 1.7182;
@@ -130,10 +133,41 @@ const elements = {
   deepSpaceCount: document.querySelector("#deepSpaceCount"),
   refreshButton: document.querySelector("#refreshButton"),
   resetFiltersButton: document.querySelector("#resetFiltersButton"),
+  copyAllButton: document.querySelector("#copyAllButton"),
+  adminModeButton: document.querySelector("#adminModeButton"),
+  exitAdminModeButton: document.querySelector("#exitAdminModeButton"),
   resetMapButton: document.querySelector("#resetMapButton"),
   mapViewport: document.querySelector("#mapViewport"),
   mapFallback: document.querySelector("#mapFallback"),
   mapList: document.querySelector("#mapList"),
+  adminModal: document.querySelector("#adminModal"),
+  adminForm: document.querySelector("#adminForm"),
+  adminTitle: document.querySelector("#adminTitle"),
+  adminCancelButton: document.querySelector("#adminCancelButton"),
+  adminPasswordLabel: document.querySelector("#adminPasswordLabel"),
+  adminPasswordInput: document.querySelector("#adminPasswordInput"),
+  adminEditFields: document.querySelector("#adminEditFields"),
+  adminNameInput: document.querySelector("#adminNameInput"),
+  adminFactionInput: document.querySelector("#adminFactionInput"),
+  adminFactionNameInput: document.querySelector("#adminFactionNameInput"),
+  adminZoneChipInput: document.querySelector("#adminZoneChipInput"),
+  adminSellsShipsInput: document.querySelector("#adminSellsShipsInput"),
+  adminSellsH2Input: document.querySelector("#adminSellsH2Input"),
+  adminSellsO2Input: document.querySelector("#adminSellsO2Input"),
+  adminPlanetInput: document.querySelector("#adminPlanetInput"),
+  adminLocationInput: document.querySelector("#adminLocationInput"),
+  adminNotesInput: document.querySelector("#adminNotesInput"),
+  adminSubmitterInput: document.querySelector("#adminSubmitterInput"),
+  adminMessage: document.querySelector("#adminMessage"),
+  adminConfirmButton: document.querySelector("#adminConfirmButton"),
+  commentModal: document.querySelector("#commentModal"),
+  commentForm: document.querySelector("#commentForm"),
+  commentTitle: document.querySelector("#commentTitle"),
+  commentCloseButton: document.querySelector("#commentCloseButton"),
+  commentThread: document.querySelector("#commentThread"),
+  commentAuthorInput: document.querySelector("#commentAuthorInput"),
+  commentTextInput: document.querySelector("#commentTextInput"),
+  commentMessage: document.querySelector("#commentMessage"),
   storageDot: document.querySelector("#storageDot"),
   storageMode: document.querySelector("#storageMode"),
   storageDetail: document.querySelector("#storageDetail")
@@ -142,6 +176,9 @@ const elements = {
 let coordinates = [];
 let supabaseClient = null;
 let mapState = null;
+let pendingAdminAction = null;
+let activeCommentRecord = null;
+let adminAuthenticated = false;
 
 function parseGps(rawText) {
   const text = rawText.trim();
@@ -270,7 +307,6 @@ function inferFactionProfile(tag) {
     name: prefixName ? `${prefixName} ${profile.suffixName}` : `${profile.category} faction (${profile.suffixName})`,
     firstName: prefixName || "Unknown",
     secondName: profile.suffixName,
-    sells: `${profile.sells}; stock can reroll and may include zone chips`,
     category: profile.category,
     tradePurposes: tradePurposesForCategory(profile.category),
     inferred: true
@@ -278,20 +314,162 @@ function inferFactionProfile(tag) {
 }
 
 function resolveFaction(tag) {
-  return inferFactionProfile(tag);
+  const normalizedTag = normalizeFactionTag(tag || "");
+  if (!normalizedTag) return null;
+  const customFaction = readLocalFactions()[normalizedTag];
+  if (customFaction) {
+    return {
+      ...customFaction,
+      tradePurposes: tradePurposesForCategory(customFaction.category)
+    };
+  }
+  return inferFactionProfile(normalizedTag);
+}
+
+function factionNameForRecord(record, faction) {
+  return record.faction_name?.trim() || faction?.name || "";
+}
+
+function readLocalFactions() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_FACTIONS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function readLocalComments() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_COMMENTS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalComments(comments) {
+  localStorage.setItem(LOCAL_COMMENTS_KEY, JSON.stringify(comments));
 }
 
 function tradePurposesForCategory(category) {
   return {
-    Builder: ["ships", "components", "zone_chips"],
-    Miner: ["ore", "zone_chips"],
-    Trader: ["components", "zone_chips"],
-    Pirate: ["weapons", "zone_chips"]
+    Builder: ["ships"],
+    Miner: ["ore"],
+    Trader: ["components"],
+    Pirate: ["weapons"]
   }[category] || ["unknown"];
+}
+
+function factionGoodsSummary(category) {
+  return tradeLabel(factionDefaultTradeItem(category));
+}
+
+function factionDefaultTradeItem(category) {
+  return {
+    Miner: "Ores",
+    Trader: "Components",
+    Builder: "Rovers and ships"
+  }[category] || "";
+}
+
+function normalizeTradeValue(value) {
+  const trade = String(value || "").trim();
+  if (!trade) return "";
+  const lower = trade.toLowerCase();
+  if (lower === "unknown") return "Unknown";
+  if (lower === "buys and sells ores") return "Ores";
+  if (lower === "buys and sells components") return "Components";
+  if (lower === "sells rovers and ships; buys components") return "Rovers and ships";
+  return trade
+    .replace(/^buys\s+and\s+sells\s+/i, "")
+    .replace(/^buy'?s\s+and\s+sells\s+/i, "")
+    .trim()
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function tradeLabel(value) {
+  const trade = normalizeTradeValue(value);
+  if (!trade || trade === "Unknown") return "Unknown";
+  return `Buys and sells ${trade}`;
+}
+
+function factionTradeSummary(faction) {
+  return tradeLabel(faction?.trade || faction?.sells || factionDefaultTradeItem(faction?.category));
+}
+
+function planetColorHex(planetName) {
+  const numeric = PLANET_COLORS[planetName] || 0x9ba7b4;
+  return `#${numeric.toString(16).padStart(6, "0")}`;
+}
+
+function renderLocationLine(record) {
+  if (record.location_type === "deep_space") {
+    return `
+      <span class="location-line deep-space-location">
+        <span class="location-icon deep-space-icon" aria-hidden="true"></span>
+        <span>Deep space</span>
+      </span>
+    `;
+  }
+
+  return `
+    <span class="location-line">
+      <span class="location-icon planet-icon" style="--planet-color: ${planetColorHex(record.planet)};" aria-hidden="true"></span>
+      <span>${escapeHtml(record.planet)} / <span class="location-type-inline"><span class="location-icon ${record.location_type === "surface" ? "surface-icon" : "orbital-icon"}" title="${typeLabel(record.location_type)} station" aria-hidden="true"></span>${typeLabel(record.location_type)}</span> / ${formatMeters(record.altitude_m)} altitude</span>
+    </span>
+  `;
+}
+
+function renderLocationRows(record) {
+  if (record.location_type === "deep_space") {
+    return `
+      <div><dt>Location</dt><dd>${renderLocationLine(record)}</dd></div>
+    `;
+  }
+
+  return `
+    <div><dt>Planet</dt><dd><span class="location-line"><span class="location-icon planet-icon" style="--planet-color: ${planetColorHex(record.planet)};" aria-hidden="true"></span><span>${escapeHtml(record.planet)}</span></span></dd></div>
+    <div><dt>Location</dt><dd><span class="location-line"><span class="location-type-inline"><span class="location-icon ${record.location_type === "surface" ? "surface-icon" : "orbital-icon"}" title="${typeLabel(record.location_type)} station" aria-hidden="true"></span>${typeLabel(record.location_type)}</span> / ${formatMeters(record.altitude_m)} altitude</span></dd></div>
+  `;
+}
+
+function economyIconClass(category) {
+  return {
+    Miner: "economy-miner-icon",
+    Trader: "economy-trader-icon",
+    Builder: "economy-builder-icon"
+  }[category] || "economy-generic-icon";
+}
+
+function renderEconomyLine(faction, economySummary) {
+  return `
+    <span class="economy-line">
+      <span class="economy-icon ${economyIconClass(faction?.category)}" aria-hidden="true"></span>
+      <span>${escapeHtml(economySummary || "Server-specific")}</span>
+    </span>
+  `;
 }
 
 function factionColor(faction) {
   return FACTION_TYPE_COLORS[faction?.category || "Unknown"] || FACTION_TYPE_COLORS.Unknown;
+}
+
+function copyColorForRecord(record) {
+  const faction = resolveFaction(record?.faction_tag);
+  const hex = factionColor(faction).hex.replace("#", "").toUpperCase();
+  return `#FF${hex}`;
+}
+
+function gpsWithColor(record, color = copyColorForRecord(record)) {
+  try {
+    const parsed = parseGps(record.raw_text);
+    return `GPS:${parsed.name}:${formatGpsNumber(parsed.x)}:${formatGpsNumber(parsed.y)}:${formatGpsNumber(parsed.z)}:${normalizeGpsColor(color)}:`;
+  } catch {
+    return `GPS:${record.name}:${formatGpsNumber(record.x)}:${formatGpsNumber(record.y)}:${formatGpsNumber(record.z)}:${normalizeGpsColor(color)}:`;
+  }
+}
+
+function stationCopyGps(record) {
+  return gpsWithColor(record, copyColorForRecord(record));
 }
 
 function buildRecord(parsed, extra = {}) {
@@ -308,12 +486,43 @@ function buildRecord(parsed, extra = {}) {
     planet: classification.planet,
     location_type: classification.locationType,
     faction_tag: factionTag,
+    faction_name: extra.factionName || "",
+    has_zone_chips: Boolean(extra.hasZoneChips),
+    sells_ships: Boolean(extra.sellsShips),
+    sells_h2_gas: Boolean(extra.sellsH2Gas),
+    sells_o2_gas: Boolean(extra.sellsO2Gas),
     altitude_m: classification.altitude,
     center_distance_m: classification.centerDistance,
     notes: extra.notes || "",
     submitted_by: extra.submittedBy || "",
     created_at: new Date().toISOString()
   };
+}
+
+function formatGpsNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  return Number.isInteger(number) ? String(number) : number.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function normalizeGpsColor(value) {
+  const color = String(value || "").trim();
+  const withHash = color.startsWith("#") ? color : `#${color}`;
+  return /^#[0-9a-fA-F]{8}$/.test(withHash) ? withHash.toUpperCase() : "#FF9BA7B4";
+}
+
+function gpsCoreChanged(record, values) {
+  return record.name !== values.name ||
+    Number(record.x) !== Number(values.x) ||
+    Number(record.y) !== Number(values.y) ||
+    Number(record.z) !== Number(values.z) ||
+    normalizeGpsColor(record.color) !== normalizeGpsColor(values.color);
+}
+
+function gpsStringForEdit(record, values) {
+  const originalGps = String(record.raw_text || "").trim();
+  if (!gpsCoreChanged(record, values)) return originalGps;
+  return `GPS:${values.name}:${formatGpsNumber(values.x)}:${formatGpsNumber(values.y)}:${formatGpsNumber(values.z)}:${normalizeGpsColor(values.color)}:`;
 }
 
 function findDuplicate(record, list) {
@@ -332,10 +541,8 @@ function findDuplicate(record, list) {
 function readLocalRecords() {
   const version = localStorage.getItem(LOCAL_STORAGE_VERSION_KEY);
   if (version !== LOCAL_STORAGE_VERSION) {
-    localStorage.removeItem(LOCAL_STORAGE_KEY);
     localStorage.removeItem("se-coordinate-factions");
     localStorage.setItem(LOCAL_STORAGE_VERSION_KEY, LOCAL_STORAGE_VERSION);
-    return [];
   }
 
   try {
@@ -346,13 +553,23 @@ function readLocalRecords() {
 }
 
 function writeLocalRecords(records) {
+  localStorage.setItem(LOCAL_STORAGE_VERSION_KEY, LOCAL_STORAGE_VERSION);
   localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(records));
 }
 
-function configureStorage() {
-  const hasSupabaseConfig = Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY && window.supabase);
+function shouldUseSharedDatabase() {
+  const isLocalHost = ["127.0.0.1", "localhost"].includes(window.location.hostname);
+  const forceShared = new URLSearchParams(window.location.search).get("shared") === "1";
+  return (!isLocalHost || forceShared) && Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY && window.supabase);
+}
 
-  if (hasSupabaseConfig) {
+function configureStorage() {
+  if (new URLSearchParams(window.location.search).get("resetLocal") === "1") {
+    localStorage.removeItem(LOCAL_STORAGE_KEY);
+    localStorage.setItem(LOCAL_STORAGE_VERSION_KEY, LOCAL_STORAGE_VERSION);
+  }
+
+  if (shouldUseSharedDatabase()) {
     supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
     elements.storageDot.classList.add("online");
     elements.storageMode.textContent = "Shared database mode";
@@ -361,7 +578,7 @@ function configureStorage() {
   }
 
   elements.storageMode.textContent = "Local demo mode";
-  elements.storageDetail.textContent = "Entries stay in this browser until Supabase is connected.";
+  elements.storageDetail.textContent = "Local testing only. Add ?shared=1 to the URL to use Supabase here.";
 }
 
 async function loadRecords() {
@@ -412,6 +629,8 @@ async function submitRecord(record) {
     p_planet: record.planet,
     p_location_type: record.location_type,
     p_faction_tag: record.faction_tag,
+    p_faction_name: record.faction_name || "",
+    p_has_zone_chips: Boolean(record.has_zone_chips),
     p_altitude_m: record.altitude_m,
     p_center_distance_m: record.center_distance_m,
     p_notes: record.notes,
@@ -423,6 +642,80 @@ async function submitRecord(record) {
   }
 
   return data;
+}
+
+async function updateRecord(record) {
+  if (!supabaseClient) {
+    coordinates = coordinates.map((item) => item.id === record.id ? record : item);
+    writeLocalRecords(coordinates);
+    render();
+    return;
+  }
+
+  const { error } = await supabaseClient.rpc("update_coordinate_admin", {
+    p_admin_code: ADMIN_PASSWORD,
+    p_id: record.id,
+    p_raw_text: record.raw_text,
+    p_name: record.name,
+    p_x: record.x,
+    p_y: record.y,
+    p_z: record.z,
+    p_color: record.color,
+    p_planet: record.planet,
+    p_location_type: record.location_type,
+    p_faction_tag: record.faction_tag,
+    p_faction_name: record.faction_name || "",
+    p_has_zone_chips: Boolean(record.has_zone_chips),
+    p_altitude_m: record.altitude_m,
+    p_center_distance_m: record.center_distance_m,
+    p_notes: record.notes,
+    p_submitted_by: record.submitted_by
+  });
+
+  if (error) throw new Error(error.message);
+  await loadRecords();
+}
+
+async function deleteRecord(recordId) {
+  if (!supabaseClient) {
+    const currentRecords = readLocalRecords();
+    const nextRecords = currentRecords.filter((item) => String(item.id) !== String(recordId));
+
+    if (nextRecords.length === currentRecords.length) {
+      throw new Error("Delete could not find that station in local storage. Refresh and try again.");
+    }
+
+    coordinates = nextRecords;
+    writeLocalRecords(coordinates);
+    render();
+    return;
+  }
+
+  const { error } = await supabaseClient.rpc("delete_coordinate_admin", {
+    p_admin_code: ADMIN_PASSWORD,
+    p_id: recordId
+  });
+
+  if (error) {
+    throw new Error(formatAdminRpcError(error, "delete"));
+  }
+  await loadRecords();
+
+  if (coordinates.some((item) => item.id === recordId)) {
+    throw new Error("Delete did not remove the station. Run supabase-admin-repair.sql in Supabase, then try again.");
+  }
+}
+
+function formatAdminRpcError(error, action) {
+  const message = error?.message || "Unknown Supabase error.";
+  const missingFunction = message.toLowerCase().includes("could not find the function") ||
+    message.toLowerCase().includes("not found");
+
+  if (missingFunction) {
+    return `Admin ${action} is not installed in Supabase yet. Run supabase-admin-repair.sql in the Supabase SQL Editor, then try again.`;
+  }
+
+  return message;
 }
 
 function setMessage(message, tone = "") {
@@ -473,7 +766,13 @@ function filteredRecords() {
     const matchesPlanet = planet === "all" || record.planet === planet;
     const matchesType = type === "all" || record.location_type === type;
     const faction = resolveFaction(record.faction_tag);
-    const matchesTrade = trade === "all" || (faction?.tradePurposes || ["unknown"]).includes(trade);
+    const tradePurposes = faction?.tradePurposes || ["unknown"];
+    const matchesTrade = trade === "all" ||
+      (trade === "zone_chips" ? Boolean(record.has_zone_chips) :
+        trade === "ships" ? Boolean(record.sells_ships) || tradePurposes.includes(trade) :
+          trade === "h2_gas" ? Boolean(record.sells_h2_gas) :
+            trade === "o2_gas" ? Boolean(record.sells_o2_gas) :
+              tradePurposes.includes(trade));
     const haystack = [
       record.name,
       record.raw_text,
@@ -482,11 +781,16 @@ function filteredRecords() {
       record.notes,
       record.submitted_by,
       record.faction_tag,
+      record.sells_ships ? "ships rovers" : "",
+      record.sells_h2_gas ? "h2 gas hydrogen" : "",
+      record.sells_o2_gas ? "o2 gas oxygen" : "",
+      record.faction_name,
       faction?.name,
       faction?.firstName,
       faction?.secondName,
       faction?.category,
-      faction?.sells
+      factionTradeSummary(faction),
+      record.has_zone_chips ? "zone chips" : ""
     ].join(" ").toLowerCase();
     return matchesPlanet && matchesType && matchesTrade && haystack.includes(query);
   });
@@ -521,6 +825,13 @@ function renderPlanetOptions() {
   elements.planetFilter.value = options.includes(currentValue) ? currentValue : "all";
 }
 
+function renderAdminPlanetOptions() {
+  if (!elements.adminPlanetInput) return;
+  elements.adminPlanetInput.innerHTML = PLANETS.map((planet) => (
+    `<option value="${planet.name}">${planet.name}</option>`
+  )).join("");
+}
+
 function renderStats() {
   elements.totalCount.textContent = coordinates.length;
   elements.surfaceCount.textContent = coordinates.filter((record) => record.location_type === "surface").length;
@@ -539,40 +850,264 @@ function renderResults() {
   elements.resultsList.innerHTML = records.map((record) => renderRecordCard(record)).join("");
 }
 
+function applyUrlFilters() {
+  const params = new URLSearchParams(window.location.search);
+  const faction = normalizeFactionTag(params.get("faction") || "");
+  if (!faction) return;
+  elements.searchInput.value = faction;
+  window.history.replaceState({}, "", window.location.pathname);
+}
+
 function renderRecordCard(record) {
   const faction = resolveFaction(record.faction_tag);
   const color = factionColor(faction);
+  const factionName = factionNameForRecord(record, faction);
   const displayName = faction?.firstName && faction?.secondName
-    ? `${record.name} (${faction.firstName} ${faction.secondName})`
-    : faction?.name
-      ? `${record.name} (${faction.name})`
+    ? `${record.name} (${record.faction_name?.trim() || `${faction.firstName} ${faction.secondName}`})`
+    : factionName
+      ? `${record.name} (${factionName})`
       : record.name;
   const factionType = faction
-    ? `<span class="pill faction-pill" style="--faction-color: ${color.hex}; --faction-bg: ${color.dim};">Type ${escapeHtml(faction.category)}</span>`
+    ? `<span class="station-type" style="--faction-color: ${color.hex}; --faction-bg: ${color.dim};">${escapeHtml(faction.category)}</span>`
     : "";
-  const sellsSummary = faction?.sells ? `<span class="pill faction-pill" style="--faction-color: ${color.hex}; --faction-bg: ${color.dim};">${escapeHtml(faction.sells)}</span>` : "";
+  const economySummary = factionTradeSummary(faction);
+  const stationFlags = [
+    record.has_zone_chips ? "Zone chips" : "",
+    record.sells_ships ? "Ships" : "",
+    record.sells_h2_gas ? "H2 gas" : "",
+    record.sells_o2_gas ? "O2 gas" : ""
+  ].filter(Boolean);
+  const stationFlagSummary = stationFlags.length
+    ? stationFlags.map((label) => `<span>${escapeHtml(label)}</span>`).join("")
+    : `<span class="muted-inline">None marked</span>`;
 
   return `
-    <article class="coordinate-card">
-      <div>
-        <h3>${escapeHtml(displayName)}</h3>
-        <div class="gps-line">${escapeHtml(record.raw_text)}</div>
-        ${record.notes ? `<p>${escapeHtml(record.notes)}</p>` : ""}
-        <div class="meta">
-          <span class="pill">${escapeHtml(record.planet)}</span>
-          <span class="pill">${typeLabel(record.location_type)}</span>
-          <span class="pill">Altitude ${formatMeters(record.altitude_m)}</span>
-          ${factionType}
-          ${sellsSummary}
-          ${record.submitted_by ? `<span class="pill">By ${escapeHtml(record.submitted_by)}</span>` : ""}
+    <article class="coordinate-card" data-station-id="${escapeHtml(record.id)}" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(record.name)}">
+      <div class="station-card-main">
+        <div class="station-card-header">
+          <div>
+            <h3>${escapeHtml(displayName)}</h3>
+            <div class="station-subtitle">${escapeHtml(record.faction_tag || "----")} ${factionType}</div>
+          </div>
         </div>
+        <div class="gps-line">${escapeHtml(stationCopyGps(record))}</div>
+        ${record.notes ? `<p>${escapeHtml(record.notes)}</p>` : ""}
+        <dl class="station-detail-list">
+          ${renderLocationRows(record)}
+          <div><dt>Economy</dt><dd>${renderEconomyLine(faction, economySummary)}</dd></div>
+          <div><dt>Extras</dt><dd><span class="station-flags">${stationFlagSummary}</span></dd></div>
+          <div><dt>Submitted</dt><dd>${record.submitted_by ? escapeHtml(record.submitted_by) : "Unknown"}</dd></div>
+        </dl>
       </div>
       <div class="card-actions">
         <button class="copy-button" type="button" data-copy-id="${escapeHtml(record.id)}">Copy Coords</button>
+        <button class="card-action-link" type="button" data-comment-id="${escapeHtml(record.id)}">Comments</button>
+        <button class="card-action-link" type="button" data-edit-id="${escapeHtml(record.id)}" ${adminAuthenticated ? "" : `disabled title="Enter admin mode to edit"`}>Edit</button>
+        <button class="card-action-link danger-button" type="button" data-delete-id="${escapeHtml(record.id)}" ${adminAuthenticated ? "" : `disabled title="Enter admin mode to delete"`}>Delete</button>
         <div class="pill">${new Date(record.created_at).toLocaleDateString()}</div>
       </div>
     </article>
   `;
+}
+
+function commentsForRecord(recordId) {
+  return readLocalComments()[recordId] || [];
+}
+
+function openCommentModal(record) {
+  activeCommentRecord = record;
+  elements.commentForm.reset();
+  elements.commentMessage.textContent = "";
+  elements.commentMessage.className = "message";
+  elements.commentTitle.textContent = `${record.name} Comments`;
+  renderCommentThread();
+  elements.commentModal.hidden = false;
+  elements.commentTextInput.focus();
+}
+
+function closeCommentModal() {
+  activeCommentRecord = null;
+  elements.commentModal.hidden = true;
+}
+
+function renderCommentThread() {
+  if (!activeCommentRecord) return;
+  const comments = commentsForRecord(activeCommentRecord.id);
+  elements.commentThread.innerHTML = comments.length
+    ? comments.map((comment) => `
+      <article class="comment-item">
+        <strong>${escapeHtml(comment.author || "Anonymous")}</strong>
+        <span>${new Date(comment.created_at).toLocaleString()}</span>
+        <p>${escapeHtml(comment.text)}</p>
+      </article>
+    `).join("")
+    : `<div class="empty">No comments yet.</div>`;
+}
+
+function addStationComment(recordId, comment) {
+  const comments = readLocalComments();
+  comments[recordId] = [
+    ...(comments[recordId] || []),
+    {
+      id: crypto.randomUUID(),
+      author: comment.author,
+      text: comment.text,
+      created_at: new Date().toISOString()
+    }
+  ];
+  writeLocalComments(comments);
+}
+
+function openStationWindow(recordId) {
+  const detailUrl = `station.html?id=${encodeURIComponent(recordId)}`;
+  const stationWindow = window.open(detailUrl, "_blank");
+  if (!stationWindow) {
+    window.location.href = detailUrl;
+  }
+}
+
+function openAdminModal(action, record) {
+  if (["edit", "delete"].includes(action) && !adminAuthenticated) {
+    setMessage("Enter admin mode before editing or deleting.", "bad");
+    return;
+  }
+  pendingAdminAction = { action, record };
+  elements.adminForm.reset();
+  elements.adminMessage.textContent = "";
+  elements.adminMessage.className = "message";
+  elements.adminTitle.textContent = action === "admin" ? "Admin Mode" : action === "edit" ? `Edit ${record.name}` : `Delete ${record.name}`;
+  elements.adminConfirmButton.textContent = action === "admin" ? "Enter Admin Mode" : action === "edit" ? "Save Changes" : "Delete Station";
+  elements.adminConfirmButton.classList.toggle("danger-button", action === "delete");
+  elements.adminEditFields.hidden = action !== "edit";
+  setAdminEditFieldsEnabled(action === "edit");
+  setAdminPasswordPromptVisible(action === "admin");
+  if (record) {
+    elements.adminNameInput.value = record.name;
+    elements.adminFactionInput.value = record.faction_tag || "";
+    elements.adminFactionNameInput.value = record.faction_name || "";
+    elements.adminZoneChipInput.checked = Boolean(record.has_zone_chips);
+    elements.adminSellsShipsInput.checked = Boolean(record.sells_ships);
+    elements.adminSellsH2Input.checked = Boolean(record.sells_h2_gas);
+    elements.adminSellsO2Input.checked = Boolean(record.sells_o2_gas);
+    elements.adminPlanetInput.value = record.planet;
+    elements.adminLocationInput.value = record.location_type;
+    elements.adminNotesInput.value = record.notes || "";
+    elements.adminSubmitterInput.value = record.submitted_by || "";
+  }
+  if (action === "delete") {
+    elements.adminMessage.className = "message bad";
+    elements.adminMessage.textContent = `Are you sure you want to delete ${record.name}? This cannot be undone.`;
+  }
+  elements.adminModal.hidden = false;
+  if (action === "admin") elements.adminPasswordInput.focus();
+  else elements.adminConfirmButton.focus();
+}
+
+function closeAdminModal() {
+  pendingAdminAction = null;
+  setAdminEditFieldsEnabled(true);
+  setAdminPasswordPromptVisible(true);
+  elements.adminModal.hidden = true;
+}
+
+function renderAdminModeControls() {
+  elements.adminModeButton.hidden = adminAuthenticated;
+  elements.exitAdminModeButton.hidden = !adminAuthenticated;
+}
+
+function setAdminPasswordPromptVisible(visible) {
+  elements.adminPasswordLabel.hidden = !visible;
+  elements.adminPasswordLabel.style.display = visible ? "" : "none";
+  elements.adminPasswordInput.required = visible;
+  if (!visible) elements.adminPasswordInput.value = "";
+}
+
+function setAdminEditFieldsEnabled(enabled) {
+  elements.adminEditFields.querySelectorAll("input, select, textarea").forEach((field) => {
+    field.disabled = !enabled;
+  });
+}
+
+function keepAdminModalInputOpen(event) {
+  if (event.key !== "Enter") return;
+  const target = event.target;
+  if (target?.tagName === "TEXTAREA") return;
+  if (target?.closest("button")) return;
+  event.preventDefault();
+}
+
+async function submitAdminAction(event) {
+  event.preventDefault();
+  if (!pendingAdminAction) return;
+
+  const { action, record } = pendingAdminAction;
+  if (action === "admin" && elements.adminPasswordInput.value !== ADMIN_PASSWORD) {
+    elements.adminMessage.className = "message bad";
+    elements.adminMessage.textContent = "Wrong password.";
+    return;
+  }
+  if (action === "admin") {
+    adminAuthenticated = true;
+    renderAdminModeControls();
+    renderFilteredViews();
+    closeAdminModal();
+    setMessage("Admin mode enabled.", "good");
+    return;
+  }
+
+  try {
+    if (action === "edit") {
+      const name = elements.adminNameInput.value.trim();
+      const submittedBy = elements.adminSubmitterInput.value.trim();
+      if (!name) throw new Error("Station name is required.");
+      if (!submittedBy) throw new Error("Submitted by is required.");
+      const rawText = gpsStringForEdit(record, {
+        name,
+        x: record.x,
+        y: record.y,
+        z: record.z,
+        color: record.color
+      });
+      const updated = {
+        ...record,
+        raw_text: rawText,
+        name,
+        planet: elements.adminPlanetInput.value,
+        location_type: elements.adminLocationInput.value,
+        faction_tag: normalizeFactionTag(elements.adminFactionInput.value),
+        faction_name: elements.adminFactionNameInput.value.trim(),
+        has_zone_chips: elements.adminZoneChipInput.checked,
+        sells_ships: elements.adminSellsShipsInput.checked,
+        sells_h2_gas: elements.adminSellsH2Input.checked,
+        sells_o2_gas: elements.adminSellsO2Input.checked,
+        notes: elements.adminNotesInput.value.trim(),
+        submitted_by: submittedBy
+      };
+      const selectedPlanet = PLANETS.find((planet) => planet.name === updated.planet);
+      if (selectedPlanet) {
+        updated.center_distance_m = distance3d(updated, selectedPlanet);
+        updated.altitude_m = updated.center_distance_m - selectedPlanet.radius;
+      }
+      updated.id = record.id;
+      updated.created_at = record.created_at;
+      await updateRecord(updated);
+      setMessage(`${updated.name} updated.`, "good");
+      closeAdminModal();
+    } else {
+      const deletedName = record.name;
+      const deletedId = record.id;
+      closeAdminModal();
+      try {
+        await deleteRecord(deletedId);
+        setMessage(`${deletedName} deleted.`, "good");
+      } catch (deleteError) {
+        setMessage(`Delete failed: ${deleteError.message}`, "bad");
+      }
+    }
+  } catch (error) {
+    elements.adminMessage.className = "message bad";
+    elements.adminMessage.textContent = error.message;
+  }
 }
 
 function renderFactionPreview(tag, faction) {
@@ -825,7 +1360,7 @@ function focusMapObjectFromPointer(event) {
   const stationHit = stationHits.find((hit) => hit.object.userData?.type === "station");
   if (stationHit) {
     const record = coordinates.find((item) => item.id === stationHit.object.userData.recordId);
-    if (record) selectStation(record);
+    if (record) openStationWindow(record.id);
     return;
   }
 
@@ -1086,6 +1621,7 @@ function updateMap() {
 
   for (const record of records) {
     const faction = resolveFaction(record.faction_tag);
+    const factionName = factionNameForRecord(record, faction);
     const color = factionColor(faction);
     const material = new THREE.MeshStandardMaterial({
       color: color.numeric,
@@ -1111,12 +1647,13 @@ function renderMapList(records) {
 
   const stationRows = records.map((record) => {
     const faction = resolveFaction(record.faction_tag);
+    const factionName = factionNameForRecord(record, faction);
     const color = factionColor(faction);
     return `
       <button class="map-item" type="button" data-map-id="${escapeHtml(record.id)}" style="border-color: ${color.hex};">
         <strong>${escapeHtml(record.name)}</strong>
         <span>${escapeHtml(record.planet)} - ${typeLabel(record.location_type)} - ${formatDistance(record.altitude_m)} altitude</span>
-        <span>${faction ? `${escapeHtml(faction.name)} - ${escapeHtml(faction.category)}` : "Faction unknown"}</span>
+        <span>${faction ? `${escapeHtml(factionName)} - ${escapeHtml(faction.category)}` : "Faction unknown"}</span>
       </button>
     `;
   }).join("");
@@ -1127,8 +1664,12 @@ function renderMapList(records) {
 
 async function copyToClipboard(text) {
   if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Some embedded browsers expose the Clipboard API but deny write permission.
+    }
   }
 
   const textarea = document.createElement("textarea");
@@ -1142,7 +1683,19 @@ async function copyToClipboard(text) {
   textarea.remove();
 }
 
-elements.form.addEventListener("submit", async (event) => {
+async function copyAllVisibleStations() {
+  const records = filteredRecords();
+  if (!records.length) {
+    setMessage("No stations to copy in this view.", "bad");
+    return false;
+  }
+
+  await copyToClipboard(records.map((record) => stationCopyGps(record)).join("\n"));
+  setMessage(`${records.length} station coordinate${records.length === 1 ? "" : "s"} copied.`, "good");
+  return true;
+}
+
+if (elements.form) elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
   setMessage("Checking coordinate(s)...");
 
@@ -1192,23 +1745,75 @@ elements.form.addEventListener("submit", async (event) => {
   }
 });
 
-elements.gpsInput.addEventListener("input", updatePreview);
+elements.gpsInput?.addEventListener("input", updatePreview);
 elements.searchInput.addEventListener("input", renderFilteredViews);
 elements.planetFilter.addEventListener("change", renderFilteredViews);
 elements.typeFilter.addEventListener("change", renderFilteredViews);
 elements.tradeFilter.addEventListener("change", renderFilteredViews);
 elements.refreshButton.addEventListener("click", loadRecords);
 elements.resetFiltersButton.addEventListener("click", resetFilters);
+elements.copyAllButton.addEventListener("click", async () => {
+  try {
+    const copied = await copyAllVisibleStations();
+    if (!copied) return;
+    const originalText = elements.copyAllButton.textContent;
+    elements.copyAllButton.textContent = "Copied";
+    elements.copyAllButton.classList.add("copied");
+    setTimeout(() => {
+      elements.copyAllButton.textContent = originalText;
+      elements.copyAllButton.classList.remove("copied");
+    }, 1400);
+  } catch (error) {
+    setMessage(`Copy failed: ${error.message}`, "bad");
+  }
+});
+elements.adminModeButton.addEventListener("click", () => openAdminModal("admin", null));
+elements.exitAdminModeButton.addEventListener("click", () => {
+  adminAuthenticated = false;
+  renderAdminModeControls();
+  renderFilteredViews();
+  setMessage("Admin mode exited.", "good");
+});
 elements.resetMapButton.addEventListener("click", resetMapView);
 elements.resultsList.addEventListener("click", async (event) => {
+  const card = event.target.closest("[data-station-id]");
+
+  const commentButton = event.target.closest("[data-comment-id]");
+  if (commentButton) {
+    const record = coordinates.find((item) => item.id === commentButton.dataset.commentId);
+    if (record) openCommentModal(record);
+    return;
+  }
+
+  const editButton = event.target.closest("[data-edit-id]");
+  if (editButton) {
+    const record = coordinates.find((item) => item.id === editButton.dataset.editId);
+    if (!record) return;
+    openAdminModal("edit", record);
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-delete-id]");
+  if (deleteButton) {
+    const record = coordinates.find((item) => item.id === deleteButton.dataset.deleteId);
+    if (!record) return;
+    openAdminModal("delete", record);
+    return;
+  }
+
   const button = event.target.closest("[data-copy-id]");
+  if (!button && card) {
+    openStationWindow(card.dataset.stationId);
+    return;
+  }
+
   if (!button) return;
 
   const record = coordinates.find((item) => item.id === button.dataset.copyId);
   if (!record) return;
 
   try {
-    await copyToClipboard(record.raw_text);
+    await copyToClipboard(stationCopyGps(record));
     button.textContent = "Copied";
     setTimeout(() => {
       button.textContent = "Copy Coords";
@@ -1216,6 +1821,13 @@ elements.resultsList.addEventListener("click", async (event) => {
   } catch (error) {
     setMessage(`Copy failed: ${error.message}`, "bad");
   }
+});
+elements.resultsList.addEventListener("keydown", (event) => {
+  if (!["Enter", " "].includes(event.key)) return;
+  const card = event.target.closest("[data-station-id]");
+  if (!card) return;
+  event.preventDefault();
+  openStationWindow(card.dataset.stationId);
 });
 elements.mapList.addEventListener("click", (event) => {
   const planetButton = event.target.closest("[data-planet-name]");
@@ -1231,9 +1843,39 @@ elements.mapList.addEventListener("click", (event) => {
   const record = coordinates.find((item) => item.id === button.dataset.mapId);
   if (!record) return;
 
-  selectStation(record);
+  openStationWindow(record.id);
 });
-elements.sampleButton.addEventListener("click", () => {
+elements.adminForm?.addEventListener("submit", submitAdminAction);
+elements.adminForm?.addEventListener("click", (event) => event.stopPropagation());
+elements.adminForm?.addEventListener("pointerdown", (event) => event.stopPropagation());
+elements.adminForm?.addEventListener("keydown", keepAdminModalInputOpen);
+elements.adminCancelButton?.addEventListener("click", closeAdminModal);
+elements.adminModal?.addEventListener("click", (event) => {
+  if (event.target === elements.adminModal) closeAdminModal();
+});
+elements.commentForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!activeCommentRecord) return;
+  const text = elements.commentTextInput.value.trim();
+  if (!text) {
+    elements.commentMessage.className = "message bad";
+    elements.commentMessage.textContent = "Comment is required.";
+    return;
+  }
+  addStationComment(activeCommentRecord.id, {
+    author: elements.commentAuthorInput.value.trim(),
+    text
+  });
+  elements.commentTextInput.value = "";
+  elements.commentMessage.className = "message good";
+  elements.commentMessage.textContent = "Comment added.";
+  renderCommentThread();
+});
+elements.commentCloseButton?.addEventListener("click", closeCommentModal);
+elements.commentModal?.addEventListener("click", (event) => {
+  if (event.target === elements.commentModal) closeCommentModal();
+});
+elements.sampleButton?.addEventListener("click", () => {
   elements.gpsInput.value = SAMPLE_GPS;
   updatePreview();
   elements.gpsInput.focus();
@@ -1241,5 +1883,8 @@ elements.sampleButton.addEventListener("click", () => {
 
 configureStorage();
 renderPlanetOptions();
+renderAdminPlanetOptions();
+renderAdminModeControls();
 initMap();
+applyUrlFilters();
 loadRecords();

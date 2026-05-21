@@ -6,11 +6,12 @@ A static web app for collecting Space Engineers GPS coordinates for a server.
 
 The project has two pages:
 
-- `index.html`: SAC Server Trade Station Index
+- `index.html`: Trade Station Index
+- `add.html`: Add Trade Stations
 - `atlas.html`: Star System Navigator
 - `center.html`: 3 Point Center Calculator
 
-The trade station index:
+The Add Trade Stations page:
 
 - Parses GPS strings like `GPS:Hollis Launchway:9674.61475777626:142623.007626683:-111462.180489533:#FF75C9F1:`
 - Accepts bulk GPS entry, one coordinate per line
@@ -19,8 +20,12 @@ The trade station index:
 - Labels entries as surface, orbital, or deep space
 - Copies saved GPS strings back to the clipboard
 - Reads the 4-character faction tag from the GPS name and infers faction details
+
+The Trade Station Index:
+
 - Searches and filters saved coordinates
-- Filters by trade need, such as ships/rovers, ore, components, weapons, or possible zone chips
+- Filters by trade need, such as ships/rovers, ore, components, weapons, or confirmed zone chips
+- Shows station locations on the shared 3D map
 - Runs locally with browser storage until Supabase is connected
 
 The Star System Navigator:
@@ -71,7 +76,7 @@ For vanilla economy factions, the app reads the full 4-character tag using the k
 - Miner suffixes usually sell and buy ores/raw materials.
 - Trader suffixes usually sell and buy components/general goods.
 - Builder suffixes usually sell rovers, ships, and components.
-- All economy faction types can also roll zone chips.
+- Zone chips are tracked explicitly from user submissions instead of being inferred.
 
 Each coordinate card shows the inferred first name, second name, and faction type when the tag matches the built-in table.
 
@@ -81,7 +86,7 @@ The "Looking for" filter uses those inferred faction types:
 - Ore or raw materials: Miner factions
 - Components or general goods: Trader and Builder factions
 - Weapons or ammo: Pirate/special hostile factions
-- Possible zone chips: vanilla economy factions that can roll them
+- Has zone chips: stations explicitly marked during submission or admin edit
 
 ## Detection constants
 

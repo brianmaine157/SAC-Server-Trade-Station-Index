@@ -9,7 +9,8 @@
   <body>
     <main class="shell">
       <nav class="site-nav" aria-label="Primary navigation">
-        <a class="site-nav-link active" href="index.html">Trade Stations</a>
+        <a class="site-nav-link active" href="index.html">Trade Station Index</a>
+        <a class="site-nav-link" href="factions.html">NPC Faction Index</a>
         <a class="site-nav-link" href="atlas.html">Star System Navigator</a>
         <a class="site-nav-link" href="center.html">3 Point Center</a>
       </nav>
@@ -17,10 +18,11 @@
       <section class="hero">
         <div>
           <p class="eyebrow">Server coordinate registry</p>
-          <h1>SAC Server Trade Station Index</h1>
-          <p class="lede">Submit a Space Engineers GPS string, auto-detect the nearest planet or moon, and keep duplicate locations out of the list.</p>
+          <h1>Trade Station Index</h1>
+          <p class="lede">Search, filter, and map SAC server trade stations in the default star system.</p>
         </div>
         <div class="hero-side">
+          <a class="button-link" href="add.html">Add Trade Stations</a>
           <div class="status-panel">
             <span class="status-dot" id="storageDot"></span>
             <div>
@@ -29,35 +31,6 @@
             </div>
           </div>
         </div>
-      </section>
-
-      <section class="workspace">
-        <form class="submit-panel" id="coordinateForm">
-          <label for="gpsInput">Coordinate GPS string(s)</label>
-          <textarea id="gpsInput" name="gpsInput" rows="7" placeholder="GPS:Hollis Launchway:9674.61475777626:142623.007626683:-111462.180489533:#FF75C9F1:&#10;GPS:SMSB Trade Station:12345:67890:-12345:#FFFFFFFF:" required></textarea>
-
-          <div class="field-grid">
-            <label>
-              Notes
-              <input id="notesInput" name="notesInput" type="text" placeholder="Optional description">
-            </label>
-            <label>
-              Submitted by
-              <input id="submitterInput" name="submitterInput" type="text" placeholder="Optional name">
-            </label>
-          </div>
-
-          <div class="preview" id="previewBox">
-            Paste a GPS coordinate to preview detection.
-          </div>
-
-          <div class="actions">
-            <button type="submit">Submit coordinate(s)</button>
-            <button class="secondary" id="sampleButton" type="button">Use sample</button>
-          </div>
-          <p class="message" id="formMessage" role="status"></p>
-        </form>
-
       </section>
 
       <section class="map-panel">
@@ -77,6 +50,9 @@
         <div class="section-heading">
           <h2>Coordinates</h2>
           <div class="section-actions">
+            <button class="ghost" id="copyAllButton" type="button">Copy All Stations</button>
+            <button class="ghost subtle-admin-button" id="adminModeButton" type="button">Admin Mode</button>
+            <button class="ghost subtle-admin-button" id="exitAdminModeButton" type="button" hidden>Exit Admin</button>
             <button class="ghost" id="resetFiltersButton" type="button">Reset Filters</button>
             <button class="ghost" id="refreshButton" type="button">Refresh</button>
           </div>
@@ -107,10 +83,12 @@
               <select id="tradeFilter">
                 <option value="all">Anything</option>
                 <option value="ships">Ships or rovers</option>
+                <option value="h2_gas">H2 gas</option>
+                <option value="o2_gas">O2 gas</option>
                 <option value="ore">Ore or raw materials</option>
                 <option value="components">Components or general goods</option>
                 <option value="weapons">Weapons or ammo</option>
-                <option value="zone_chips">Possible zone chips</option>
+                <option value="zone_chips">Has zone chips</option>
                 <option value="unknown">Unknown or special factions</option>
               </select>
             </label>
@@ -134,10 +112,113 @@
               <span>deep space</span>
             </div>
           </div>
+          <p class="message" id="formMessage" role="status"></p>
         </div>
 
         <div class="results" id="resultsList"></div>
       </section>
+
+      <div class="modal-backdrop" id="adminModal" hidden>
+        <form class="admin-modal" id="adminForm">
+          <div class="section-heading">
+            <h2 id="adminTitle">Admin Action</h2>
+            <button class="ghost" id="adminCancelButton" type="button">Cancel</button>
+          </div>
+
+          <label id="adminPasswordLabel">
+            Password
+            <input id="adminPasswordInput" type="password" inputmode="numeric" autocomplete="off" required>
+          </label>
+
+          <div id="adminEditFields">
+            <div class="field-grid">
+              <label>
+                Station name
+                <input id="adminNameInput" type="text">
+              </label>
+              <label>
+                Faction tag
+                <input id="adminFactionInput" type="text" maxlength="4">
+              </label>
+            </div>
+            <label class="wide-field">
+              Faction name
+              <input id="adminFactionNameInput" type="text" placeholder="Optional custom faction name">
+            </label>
+            <label class="checkbox-row wide-field">
+              <input id="adminZoneChipInput" type="checkbox">
+              Has zone chips
+            </label>
+            <div class="feature-checkbox-grid wide-field">
+              <label class="checkbox-row">
+                <input id="adminSellsShipsInput" type="checkbox">
+                Sells ships
+              </label>
+              <label class="checkbox-row">
+                <input id="adminSellsH2Input" type="checkbox">
+                Sells H2 gas
+              </label>
+              <label class="checkbox-row">
+                <input id="adminSellsO2Input" type="checkbox">
+                Sells O2 gas
+              </label>
+            </div>
+            <div class="field-grid">
+              <label>
+                Planet
+                <select id="adminPlanetInput"></select>
+              </label>
+              <label>
+                Location type
+                <select id="adminLocationInput">
+                  <option value="surface">Surface</option>
+                  <option value="orbital">Orbital</option>
+                  <option value="deep_space">Deep space</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-grid">
+              <label>
+                Notes
+                <input id="adminNotesInput" type="text">
+              </label>
+              <label>
+                Submitted by
+                <input id="adminSubmitterInput" type="text" required>
+              </label>
+            </div>
+          </div>
+
+          <p class="message" id="adminMessage"></p>
+          <div class="actions">
+            <button id="adminConfirmButton" type="submit">Confirm</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="modal-backdrop" id="commentModal" hidden>
+        <form class="admin-modal" id="commentForm">
+          <div class="section-heading">
+            <h2 id="commentTitle">Station Comments</h2>
+            <button class="ghost" id="commentCloseButton" type="button">Close</button>
+          </div>
+          <div class="comment-thread" id="commentThread"></div>
+          <div class="field-grid">
+            <label>
+              Name
+              <input id="commentAuthorInput" type="text" placeholder="Optional">
+            </label>
+            <label>
+              Comment
+              <input id="commentTextInput" type="text" required>
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit">Add Comment</button>
+          </div>
+          <p class="message" id="commentMessage"></p>
+        </form>
+      </div>
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Trade Station Details</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="site-nav-link" href="index.html">Trade Station Index</a>
+        <a class="site-nav-link" href="factions.html">NPC Faction Index</a>
+        <a class="site-nav-link" href="atlas.html">Star System Navigator</a>
+        <a class="site-nav-link" href="center.html">3 Point Center</a>
+      </nav>
+
+      <section class="hero station-detail-hero">
+        <div>
+          <p class="eyebrow">Trade station detail</p>
+          <h1 id="stationTitle">Station</h1>
+          <p class="lede" id="stationSubtitle">Loading station details...</p>
+        </div>
+      </section>
+
+      <section class="map-panel station-detail-map-panel">
+        <div class="section-heading">
+          <h2>Station Map</h2>
+          <button class="ghost" id="resetStationMapButton" type="button">Reset View</button>
+        </div>
+        <div class="map-viewport station-detail-map" id="stationMapViewport">
+          <div class="map-fallback" id="stationMapFallback">Loading map...</div>
+        </div>
+      </section>
+
+      <section class="station-action-panel" aria-label="Station actions">
+        <a class="button-link" href="index.html">Back to Index</a>
+        <button class="ghost" id="copyStationButton" type="button">Copy Coords</button>
+        <button class="ghost" id="copyJumpButton" type="button" hidden>Copy Jump Coords</button>
+        <button class="ghost subtle-admin-button" id="editStationButton" type="button">Edit</button>
+        <button class="ghost subtle-admin-button danger-button" id="deleteStationButton" type="button">Delete</button>
+        <button class="ghost subtle-admin-button" id="adminModeButton" type="button">Admin Mode</button>
+        <button class="ghost subtle-admin-button" id="exitAdminModeButton" type="button" hidden>Exit Admin</button>
+      </section>
+
+      <section class="results-panel station-detail-body">
+        <div class="section-heading">
+          <h2>Details</h2>
+        </div>
+        <div id="stationDetails"></div>
+        <p class="message" id="stationMessage" role="status"></p>
+      </section>
+
+      <section class="results-panel station-comments-panel">
+        <div class="section-heading">
+          <h2>Comments</h2>
+        </div>
+        <div class="comment-thread station-page-comments" id="stationCommentThread"></div>
+        <form id="stationCommentForm">
+          <div class="field-grid">
+            <label>
+              Name
+              <input id="stationCommentAuthorInput" type="text" placeholder="Optional">
+            </label>
+            <label>
+              Comment
+              <input id="stationCommentTextInput" type="text" required>
+            </label>
+          </div>
+          <div class="actions wide-field">
+            <button type="submit">Add Comment</button>
+          </div>
+        </form>
+      </section>
+
+      <div class="modal-backdrop" id="stationAdminModal" hidden>
+        <form class="admin-modal" id="stationAdminForm">
+          <div class="section-heading">
+            <h2 id="stationAdminTitle">Admin Action</h2>
+            <button class="ghost" id="stationAdminCancelButton" type="button">Cancel</button>
+          </div>
+
+          <label id="stationAdminPasswordLabel">
+            Password
+            <input id="stationAdminPasswordInput" type="password" inputmode="numeric" autocomplete="off" required>
+          </label>
+
+          <div id="stationAdminEditFields">
+            <div class="field-grid">
+              <label>
+                Station name
+                <input id="stationAdminNameInput" type="text">
+              </label>
+              <label>
+                Faction tag
+                <input id="stationAdminFactionInput" type="text" maxlength="4">
+              </label>
+            </div>
+            <label class="wide-field">
+              Faction name
+              <input id="stationAdminFactionNameInput" type="text" placeholder="Optional custom faction name">
+            </label>
+            <label class="checkbox-row wide-field">
+              <input id="stationAdminZoneChipInput" type="checkbox">
+              Has zone chips
+            </label>
+            <div class="feature-checkbox-grid wide-field">
+              <label class="checkbox-row">
+                <input id="stationAdminSellsShipsInput" type="checkbox">
+                Sells ships
+              </label>
+              <label class="checkbox-row">
+                <input id="stationAdminSellsH2Input" type="checkbox">
+                Sells H2 gas
+              </label>
+              <label class="checkbox-row">
+                <input id="stationAdminSellsO2Input" type="checkbox">
+                Sells O2 gas
+              </label>
+            </div>
+            <div class="field-grid">
+              <label>
+                Planet
+                <select id="stationAdminPlanetInput"></select>
+              </label>
+              <label>
+                Location type
+                <select id="stationAdminLocationInput">
+                  <option value="surface">Surface</option>
+                  <option value="orbital">Orbital</option>
+                  <option value="deep_space">Deep space</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-grid">
+              <label>
+                Notes
+                <input id="stationAdminNotesInput" type="text">
+              </label>
+              <label>
+                Submitted by
+                <input id="stationAdminSubmitterInput" type="text" required>
+              </label>
+            </div>
+          </div>
+
+          <p class="message" id="stationAdminMessage"></p>
+          <div class="actions">
+            <button id="stationAdminConfirmButton" type="submit">Confirm</button>
+          </div>
+        </form>
+      </div>
+    </main>
+
+    <script src="station.js"></script>
+  </body>
+</html>

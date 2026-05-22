@@ -916,8 +916,20 @@ function renderRecordCard(record) {
   `;
 }
 
-function commentsForRecord(recordId) {
-  return readLocalComments()[recordId] || [];
+async function commentsForRecord(recordId) {
+  if (!supabaseClient) return readLocalComments()[recordId] || [];
+  const { data, error } = await supabaseClient
+    .from("station_comments")
+    .select("id,author,comment_text,created_at")
+    .eq("coordinate_id", recordId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []).map((comment) => ({
+    id: comment.id,
+    author: comment.author,
+    text: comment.comment_text,
+    created_at: comment.created_at
+  }));
 }
 
 function openCommentModal(record) {
@@ -926,9 +938,9 @@ function openCommentModal(record) {
   elements.commentMessage.textContent = "";
   elements.commentMessage.className = "message";
   elements.commentTitle.textContent = `${record.name} Comments`;
-  renderCommentThread();
   elements.commentModal.hidden = false;
   elements.commentTextInput.focus();
+  renderCommentThread();
 }
 
 function closeCommentModal() {
@@ -936,21 +948,37 @@ function closeCommentModal() {
   elements.commentModal.hidden = true;
 }
 
-function renderCommentThread() {
+async function renderCommentThread() {
   if (!activeCommentRecord) return;
-  const comments = commentsForRecord(activeCommentRecord.id);
-  elements.commentThread.innerHTML = comments.length
-    ? comments.map((comment) => `
-      <article class="comment-item">
-        <strong>${escapeHtml(comment.author || "Anonymous")}</strong>
-        <span>${new Date(comment.created_at).toLocaleString()}</span>
-        <p>${escapeHtml(comment.text)}</p>
-      </article>
-    `).join("")
-    : `<div class="empty">No comments yet.</div>`;
+  elements.commentThread.innerHTML = `<div class="empty">Loading comments...</div>`;
+  try {
+    const comments = await commentsForRecord(activeCommentRecord.id);
+    elements.commentThread.innerHTML = comments.length
+      ? comments.map((comment) => `
+        <article class="comment-item">
+          <strong>${escapeHtml(comment.author || "Anonymous")}</strong>
+          <span>${new Date(comment.created_at).toLocaleString()}</span>
+          <p>${escapeHtml(comment.text)}</p>
+        </article>
+      `).join("")
+      : `<div class="empty">No comments yet.</div>`;
+  } catch (error) {
+    elements.commentThread.innerHTML = `<div class="empty">Could not load comments: ${escapeHtml(error.message)}</div>`;
+  }
 }
 
-function addStationComment(recordId, comment) {
+async function addStationComment(recordId, comment) {
+  if (supabaseClient) {
+    const { error } = await supabaseClient
+      .from("station_comments")
+      .insert({
+        coordinate_id: recordId,
+        author: comment.author || "",
+        comment_text: comment.text
+      });
+    if (error) throw new Error(error.message);
+    return;
+  }
   const comments = readLocalComments();
   comments[recordId] = [
     ...(comments[recordId] || []),
@@ -1859,7 +1887,7 @@ elements.adminCancelButton?.addEventListener("click", closeAdminModal);
 elements.adminModal?.addEventListener("click", (event) => {
   if (event.target === elements.adminModal) closeAdminModal();
 });
-elements.commentForm?.addEventListener("submit", (event) => {
+elements.commentForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!activeCommentRecord) return;
   const text = elements.commentTextInput.value.trim();
@@ -1868,14 +1896,19 @@ elements.commentForm?.addEventListener("submit", (event) => {
     elements.commentMessage.textContent = "Comment is required.";
     return;
   }
-  addStationComment(activeCommentRecord.id, {
-    author: elements.commentAuthorInput.value.trim(),
-    text
-  });
-  elements.commentTextInput.value = "";
-  elements.commentMessage.className = "message good";
-  elements.commentMessage.textContent = "Comment added.";
-  renderCommentThread();
+  try {
+    await addStationComment(activeCommentRecord.id, {
+      author: elements.commentAuthorInput.value.trim(),
+      text
+    });
+    elements.commentTextInput.value = "";
+    elements.commentMessage.className = "message good";
+    elements.commentMessage.textContent = "Comment added.";
+    await renderCommentThread();
+  } catch (error) {
+    elements.commentMessage.className = "message bad";
+    elements.commentMessage.textContent = error.message;
+  }
 });
 elements.commentCloseButton?.addEventListener("click", closeCommentModal);
 elements.commentModal?.addEventListener("click", (event) => {

@@ -133,6 +133,7 @@ let latestJumpHitbox = null;
 let latestStationHitbox = null;
 let latestStationMarkerHitbox = null;
 let mapToast = null;
+let supabaseClient = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -252,12 +253,71 @@ function stationJumpCoordinate() {
   };
 }
 
-function replaceStation(updated) {
+function shouldUseSharedDatabase() {
+  const isLocalHost = ["127.0.0.1", "localhost"].includes(window.location.hostname);
+  const forceShared = new URLSearchParams(window.location.search).get("shared") === "1";
+  return (!isLocalHost || forceShared) && Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY && window.supabase);
+}
+
+function configureStorage() {
+  if (shouldUseSharedDatabase()) {
+    supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+  }
+}
+
+async function loadStationRecord(stationId) {
+  if (!supabaseClient) {
+    return readJson(LOCAL_STORAGE_KEY, []).find((item) => item.id === stationId) || null;
+  }
+  const { data, error } = await supabaseClient
+    .from("coordinates")
+    .select("*")
+    .eq("id", stationId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data || null;
+}
+
+async function replaceStation(updated) {
+  if (supabaseClient) {
+    const { error } = await supabaseClient.rpc("update_coordinate_admin", {
+      p_admin_code: ADMIN_PASSWORD,
+      p_id: updated.id,
+      p_raw_text: updated.raw_text,
+      p_name: updated.name,
+      p_x: updated.x,
+      p_y: updated.y,
+      p_z: updated.z,
+      p_color: updated.color,
+      p_planet: updated.planet,
+      p_location_type: updated.location_type,
+      p_faction_tag: updated.faction_tag,
+      p_faction_name: updated.faction_name || "",
+      p_has_zone_chips: Boolean(updated.has_zone_chips),
+      p_sells_ships: Boolean(updated.sells_ships),
+      p_sells_h2_gas: Boolean(updated.sells_h2_gas),
+      p_sells_o2_gas: Boolean(updated.sells_o2_gas),
+      p_altitude_m: updated.altitude_m,
+      p_center_distance_m: updated.center_distance_m,
+      p_notes: updated.notes,
+      p_submitted_by: updated.submitted_by
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
   const records = readJson(LOCAL_STORAGE_KEY, []);
   writeJson(LOCAL_STORAGE_KEY, records.map((record) => record.id === updated.id ? updated : record));
 }
 
-function deleteStation(recordId) {
+async function deleteStation(recordId) {
+  if (supabaseClient) {
+    const { error } = await supabaseClient.rpc("delete_coordinate_admin", {
+      p_admin_code: ADMIN_PASSWORD,
+      p_id: recordId
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
   const records = readJson(LOCAL_STORAGE_KEY, []);
   writeJson(LOCAL_STORAGE_KEY, records.filter((record) => record.id !== recordId));
 }
@@ -365,9 +425,16 @@ function economyIconClass(category) {
   }[category] || "economy-generic-icon";
 }
 
-function renderStation() {
+async function renderStation() {
   const id = new URLSearchParams(window.location.search).get("id");
-  station = readJson(LOCAL_STORAGE_KEY, []).find((item) => item.id === id);
+  try {
+    station = await loadStationRecord(id);
+  } catch (error) {
+    elements.title.textContent = "Station load failed";
+    elements.subtitle.textContent = error.message;
+    elements.details.innerHTML = `<div class="empty">Could not load this station from storage.</div>`;
+    return;
+  }
   if (!station) {
     elements.title.textContent = "Station not found";
     elements.subtitle.textContent = "Return to the index and choose a station again.";
@@ -440,24 +507,52 @@ function renderActionPanel() {
   elements.deleteButton.title = adminAuthenticated ? "" : "Enter admin mode to delete";
 }
 
-function commentsForStation() {
-  return readJson(LOCAL_COMMENTS_KEY, {})[station?.id] || [];
+async function commentsForStation() {
+  if (!supabaseClient) return readJson(LOCAL_COMMENTS_KEY, {})[station?.id] || [];
+  const { data, error } = await supabaseClient
+    .from("station_comments")
+    .select("id,author,comment_text,created_at")
+    .eq("coordinate_id", station.id)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []).map((comment) => ({
+    id: comment.id,
+    author: comment.author,
+    text: comment.comment_text,
+    created_at: comment.created_at
+  }));
 }
 
-function renderComments() {
-  const comments = commentsForStation();
-  elements.commentThread.innerHTML = comments.length
-    ? comments.map((comment) => `
-      <article class="comment-item">
-        <strong>${escapeHtml(comment.author || "Anonymous")}</strong>
-        <span>${new Date(comment.created_at).toLocaleString()}</span>
-        <p>${escapeHtml(comment.text)}</p>
-      </article>
-    `).join("")
-    : `<div class="empty">No comments yet.</div>`;
+async function renderComments() {
+  elements.commentThread.innerHTML = `<div class="empty">Loading comments...</div>`;
+  try {
+    const comments = await commentsForStation();
+    elements.commentThread.innerHTML = comments.length
+      ? comments.map((comment) => `
+        <article class="comment-item">
+          <strong>${escapeHtml(comment.author || "Anonymous")}</strong>
+          <span>${new Date(comment.created_at).toLocaleString()}</span>
+          <p>${escapeHtml(comment.text)}</p>
+        </article>
+      `).join("")
+      : `<div class="empty">No comments yet.</div>`;
+  } catch (error) {
+    elements.commentThread.innerHTML = `<div class="empty">Could not load comments: ${escapeHtml(error.message)}</div>`;
+  }
 }
 
-function addComment(author, text) {
+async function addComment(author, text) {
+  if (supabaseClient) {
+    const { error } = await supabaseClient
+      .from("station_comments")
+      .insert({
+        coordinate_id: station.id,
+        author,
+        comment_text: text
+      });
+    if (error) throw new Error(error.message);
+    return;
+  }
   const comments = readJson(LOCAL_COMMENTS_KEY, {});
   comments[station.id] = [
     ...(comments[station.id] || []),
@@ -1037,16 +1132,21 @@ elements.resetMapButton.addEventListener("click", () => {
   updateCamera();
 });
 
-elements.commentForm.addEventListener("submit", (event) => {
+elements.commentForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!station) return;
   const text = elements.commentTextInput.value.trim();
   if (!text) return;
-  addComment(elements.commentAuthorInput.value.trim(), text);
-  elements.commentTextInput.value = "";
-  elements.message.className = "message good";
-  elements.message.textContent = "Comment added.";
-  renderComments();
+  try {
+    await addComment(elements.commentAuthorInput.value.trim(), text);
+    elements.commentTextInput.value = "";
+    elements.message.className = "message good";
+    elements.message.textContent = "Comment added.";
+    await renderComments();
+  } catch (error) {
+    elements.message.className = "message bad";
+    elements.message.textContent = error.message;
+  }
 });
 
 function openAdminModal(action) {
@@ -1132,7 +1232,7 @@ elements.adminForm.addEventListener("keydown", keepAdminModalInputOpen);
 elements.adminModal.addEventListener("click", (event) => {
   if (event.target === elements.adminModal) closeAdminModal();
 });
-elements.adminForm.addEventListener("submit", (event) => {
+elements.adminForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!station || !pendingAdminAction) return;
   if (pendingAdminAction === "admin" && elements.adminPasswordInput.value !== ADMIN_PASSWORD) {
@@ -1152,13 +1252,18 @@ elements.adminForm.addEventListener("submit", (event) => {
 
   if (pendingAdminAction === "delete") {
     const deletedName = station.name;
-    deleteStation(station.id);
-    closeAdminModal();
-    elements.message.className = "message good";
-    elements.message.textContent = `${deletedName} deleted. Returning to the index...`;
-    setTimeout(() => {
-      window.location.href = "index.html";
-    }, 700);
+    try {
+      await deleteStation(station.id);
+      closeAdminModal();
+      elements.message.className = "message good";
+      elements.message.textContent = `${deletedName} deleted. Returning to the index...`;
+      setTimeout(() => {
+        window.location.href = "index.html";
+      }, 700);
+    } catch (error) {
+      elements.adminMessage.className = "message bad";
+      elements.adminMessage.textContent = error.message;
+    }
     return;
   }
 
@@ -1187,7 +1292,7 @@ elements.adminForm.addEventListener("submit", (event) => {
       updated.center_distance_m = distance3d(updated, selectedPlanet);
       updated.altitude_m = updated.center_distance_m - selectedPlanet.radius;
     }
-    replaceStation(updated);
+    await replaceStation(updated);
     station = updated;
     closeAdminModal();
     elements.message.className = "message good";
@@ -1203,5 +1308,6 @@ elements.adminForm.addEventListener("submit", (event) => {
 window.initializeStationMap = scheduleMapInit;
 window.showStationMapError = showStationMapError;
 
+configureStorage();
 renderAdminPlanetOptions();
 renderStation();

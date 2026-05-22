@@ -75,6 +75,13 @@ create policy "Public can read station comments"
   for select
   using (true);
 
+drop policy if exists "Public can add station comments" on public.station_comments;
+
+create policy "Public can add station comments"
+  on public.station_comments
+  for insert
+  with check (true);
+
 alter table public.coordinates enable row level security;
 
 drop policy if exists "Public can read coordinates" on public.coordinates;

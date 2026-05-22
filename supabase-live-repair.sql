@@ -21,6 +21,30 @@ create table if not exists public.npc_factions (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.station_comments (
+  id uuid primary key default gen_random_uuid(),
+  coordinate_id uuid not null references public.coordinates(id) on delete cascade,
+  author text default '',
+  comment_text text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.station_comments enable row level security;
+
+drop policy if exists "Public can read station comments" on public.station_comments;
+
+create policy "Public can read station comments"
+  on public.station_comments
+  for select
+  using (true);
+
+drop policy if exists "Public can add station comments" on public.station_comments;
+
+create policy "Public can add station comments"
+  on public.station_comments
+  for insert
+  with check (true);
+
 do $$
 declare
   constraint_name text;

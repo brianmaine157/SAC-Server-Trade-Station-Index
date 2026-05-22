@@ -103,6 +103,9 @@ const elements = {
 
 let pendingAction = null;
 let adminAuthenticated = false;
+let supabaseClient = null;
+let stationRecords = [];
+let customFactionRecords = {};
 
 function normalizeFactionTag(value) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
@@ -118,6 +121,7 @@ function escapeHtml(value) {
 }
 
 function readCustomFactions() {
+  if (supabaseClient) return customFactionRecords;
   try {
     return JSON.parse(localStorage.getItem(LOCAL_FACTIONS_KEY) || "{}");
   } catch {
@@ -126,6 +130,8 @@ function readCustomFactions() {
 }
 
 function writeCustomFactions(factions) {
+  customFactionRecords = factions;
+  if (supabaseClient) return;
   localStorage.setItem(LOCAL_FACTIONS_KEY, JSON.stringify(factions));
 }
 
@@ -202,6 +208,7 @@ function selectedFactionTrade() {
 }
 
 function readLocalStations() {
+  if (supabaseClient) return stationRecords;
   try {
     return JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || "[]");
   } catch {
@@ -439,7 +446,104 @@ function deleteFaction(tag) {
   elements.pageMessage.textContent = `${tag} removed from the custom faction list.`;
 }
 
-elements.form.addEventListener("submit", (event) => {
+function hasSupabaseConfig() {
+  return Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY && window.supabase);
+}
+
+function configureStorage() {
+  if (!hasSupabaseConfig()) {
+    stationRecords = readLocalStations();
+    customFactionRecords = readCustomFactions();
+    return;
+  }
+  supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+}
+
+async function loadData() {
+  if (!supabaseClient) {
+    stationRecords = readLocalStations();
+    customFactionRecords = readCustomFactions();
+    render();
+    return;
+  }
+
+  elements.pageMessage.className = "message";
+  elements.pageMessage.textContent = "Loading shared faction data...";
+
+  const [{ data: coordinates, error: coordinateError }, { data: factions, error: factionError }] = await Promise.all([
+    supabaseClient
+      .from("coordinates")
+      .select("faction_tag")
+      .order("created_at", { ascending: false }),
+    supabaseClient
+      .from("npc_factions")
+      .select("tag,name,category,sells,updated_at")
+      .order("tag", { ascending: true })
+  ]);
+
+  if (coordinateError) throw new Error(coordinateError.message);
+  if (factionError) throw new Error(factionError.message);
+
+  stationRecords = coordinates || [];
+  customFactionRecords = Object.fromEntries((factions || []).map((faction) => [
+    normalizeFactionTag(faction.tag),
+    {
+      tag: normalizeFactionTag(faction.tag),
+      name: faction.name,
+      category: faction.category || "Unknown",
+      trade: faction.sells || "",
+      updated_at: faction.updated_at
+    }
+  ]));
+
+  elements.pageMessage.className = "message good";
+  elements.pageMessage.textContent = "Shared faction data loaded.";
+  render();
+}
+
+async function saveFactionToStorage() {
+  const tag = normalizeFactionTag(elements.tagInput.value);
+  const name = elements.nameInput.value.trim();
+  if (tag.length !== 4) throw new Error("Faction tag must be 4 letters or numbers.");
+  if (!name) throw new Error("Faction name is required.");
+  const faction = {
+    tag,
+    name,
+    category: selectedFactionType(),
+    trade: selectedFactionTrade(),
+    updated_at: new Date().toISOString()
+  };
+
+  if (supabaseClient) {
+    const { error } = await supabaseClient.rpc("upsert_npc_faction_admin", {
+      p_admin_code: ADMIN_PASSWORD,
+      p_tag: faction.tag,
+      p_name: faction.name,
+      p_category: faction.category,
+      p_sells: faction.trade
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  const factions = readCustomFactions();
+  factions[tag] = faction;
+  writeCustomFactions(factions);
+  elements.pageMessage.className = "message good";
+  elements.pageMessage.textContent = `${tag} saved.`;
+}
+
+async function deleteFactionFromStorage(tag) {
+  if (supabaseClient) {
+    const { error } = await supabaseClient.rpc("delete_npc_faction_admin", {
+      p_admin_code: ADMIN_PASSWORD,
+      p_tag: tag
+    });
+    if (error) throw new Error(error.message);
+  }
+  deleteFaction(tag);
+}
+
+elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!pendingAction) return;
   if (pendingAction.action === "admin" && elements.passwordInput.value !== ADMIN_PASSWORD) {
@@ -457,10 +561,10 @@ elements.form.addEventListener("submit", (event) => {
     return;
   }
   try {
-    if (pendingAction.action === "delete") deleteFaction(pendingAction.faction.tag);
-    else saveFaction();
+    if (pendingAction.action === "delete") await deleteFactionFromStorage(pendingAction.faction.tag);
+    else await saveFactionToStorage();
     closeModal();
-    render();
+    await loadData();
   } catch (error) {
     elements.message.className = "message bad";
     elements.message.textContent = error.message;
@@ -542,6 +646,14 @@ function applyUrlFilters() {
   elements.sourceFilter.value = "all";
 }
 
+configureStorage();
 applyUrlFilters();
 renderAdminModeControls();
-render();
+loadData().catch((error) => {
+  elements.pageMessage.className = "message bad";
+  elements.pageMessage.textContent = `Shared faction load failed: ${error.message}`;
+  supabaseClient = null;
+  stationRecords = readLocalStations();
+  customFactionRecords = readCustomFactions();
+  render();
+});

@@ -233,6 +233,17 @@ function allFactions() {
     if (!tag) continue;
     merged[tag] = { ...(merged[tag] || {}), ...faction, tag, source: "custom" };
   }
+  for (const station of readLocalStations()) {
+    const tag = normalizeFactionTag(station.faction_tag || "");
+    if (!tag || merged[tag]) continue;
+    merged[tag] = {
+      tag,
+      name: station.faction_name?.trim() || `${tag} faction`,
+      category: "Unknown",
+      trade: "Unknown",
+      source: "station"
+    };
+  }
   return Object.values(merged).sort((a, b) => a.tag.localeCompare(b.tag));
 }
 
@@ -472,7 +483,7 @@ async function loadData() {
   const [{ data: coordinates, error: coordinateError }, { data: factions, error: factionError }] = await Promise.all([
     supabaseClient
       .from("coordinates")
-      .select("faction_tag")
+      .select("faction_tag,faction_name")
       .order("created_at", { ascending: false }),
     supabaseClient
       .from("npc_factions")

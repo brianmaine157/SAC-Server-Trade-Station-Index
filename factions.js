@@ -227,12 +227,11 @@ function discoveredFactionTags() {
 
 function allFactions() {
   const custom = readCustomFactions();
-  const discoveredTags = discoveredFactionTags();
   const merged = { ...BUILT_IN_FACTIONS, ...generatedEconomyFactions() };
   for (const faction of Object.values(custom)) {
-    if (discoveredTags.has(faction.tag)) {
-      merged[faction.tag] = { ...faction, source: "custom" };
-    }
+    const tag = normalizeFactionTag(faction.tag || "");
+    if (!tag) continue;
+    merged[tag] = { ...(merged[tag] || {}), ...faction, tag, source: "custom" };
   }
   return Object.values(merged).sort((a, b) => a.tag.localeCompare(b.tag));
 }

@@ -1,10 +1,10 @@
-# Space Engineers Coordinate Registry
+# SAC Star System Hub
 
-A static web app for collecting Space Engineers GPS coordinates for a server.
+A static web app for SAC server trade stations, factions, maps, and Space Engineers GPS tools.
 
 ## What it does
 
-The project has two pages:
+The project has these pages:
 
 - `index.html`: Trade Station Index
 - `add.html`: Add Trade Stations
@@ -64,6 +64,8 @@ Paste one GPS coordinate per line. Optional notes and submitter name are applied
 3. Put your project URL and anon key in `config.js`.
 
 Deploy the folder to Cloudflare Pages, Vercel, Netlify, or GitHub Pages.
+
+Live site: https://sac-star-system-hub.netlify.app/
 
 The app stays in local browser-storage mode while `config.js` is blank. Once both values are filled in, it switches to shared Supabase mode automatically.
 

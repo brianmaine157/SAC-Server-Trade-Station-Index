@@ -399,7 +399,7 @@ function renderStation() {
 
   elements.title.textContent = station.name;
   elements.subtitle.textContent = `${station.faction_tag || "----"} - ${factionName}`;
-  document.title = `${station.name} - Trade Station`;
+  document.title = `${station.name} - SAC Star System Hub`;
   elements.details.innerHTML = `
     <dl class="station-detail-list station-detail-page-list">
       ${locationRows(station)}

@@ -21,6 +21,15 @@ create table if not exists public.npc_factions (
   updated_at timestamptz not null default now()
 );
 
+alter table public.npc_factions enable row level security;
+
+drop policy if exists "Public can read npc factions" on public.npc_factions;
+
+create policy "Public can read npc factions"
+  on public.npc_factions
+  for select
+  using (true);
+
 create table if not exists public.station_comments (
   id uuid primary key default gen_random_uuid(),
   coordinate_id uuid not null references public.coordinates(id) on delete cascade,
@@ -411,5 +420,28 @@ end;
 $$;
 
 grant execute on function public.upsert_npc_faction_admin(text, text, text, text, text) to anon, authenticated;
+
+drop function if exists public.delete_npc_faction_admin(text, text);
+
+create or replace function public.delete_npc_faction_admin(
+  p_admin_code text,
+  p_tag text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_admin_code <> '6846' then
+    raise exception 'Invalid admin password.';
+  end if;
+
+  delete from public.npc_factions
+  where tag = upper(p_tag);
+end;
+$$;
+
+grant execute on function public.delete_npc_faction_admin(text, text) to anon, authenticated;
 
 notify pgrst, 'reload schema';

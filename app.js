@@ -175,6 +175,7 @@ const elements = {
 
 let coordinates = [];
 let supabaseClient = null;
+let customFactions = {};
 let mapState = null;
 let pendingAdminAction = null;
 let activeCommentRecord = null;
@@ -327,10 +328,11 @@ function resolveFaction(tag) {
 }
 
 function factionNameForRecord(record, faction) {
-  return record.faction_name?.trim() || faction?.name || "";
+  return faction?.name || record.faction_name?.trim() || "";
 }
 
 function readLocalFactions() {
+  if (supabaseClient) return customFactions;
   try {
     return JSON.parse(localStorage.getItem(LOCAL_FACTIONS_KEY) || "{}");
   } catch {
@@ -588,17 +590,36 @@ async function loadRecords() {
     return;
   }
 
-  const coordinateResult = await supabaseClient
-    .from("coordinates")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const [coordinateResult, factionResult] = await Promise.all([
+    supabaseClient
+      .from("coordinates")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    supabaseClient
+      .from("npc_factions")
+      .select("tag,name,category,sells,updated_at")
+  ]);
 
   if (coordinateResult.error) {
     setMessage(coordinateResult.error.message, "bad");
     return;
   }
+  if (factionResult.error) {
+    setMessage(factionResult.error.message, "bad");
+    return;
+  }
 
   coordinates = coordinateResult.data || [];
+  customFactions = Object.fromEntries((factionResult.data || []).map((faction) => [
+    normalizeFactionTag(faction.tag),
+    {
+      tag: normalizeFactionTag(faction.tag),
+      name: faction.name,
+      category: faction.category || "Unknown",
+      trade: faction.sells || "",
+      updated_at: faction.updated_at
+    }
+  ]));
   render();
 }
 
@@ -1261,7 +1282,8 @@ function initMap() {
     dragging: false,
     lastX: 0,
     lastY: 0,
-    movedDuringDrag: false
+    movedDuringDrag: false,
+    hoverLabel: makeStationHoverLabel()
   };
 
   resizeMap();
@@ -1342,6 +1364,7 @@ function bindMapControls() {
 
   viewport.addEventListener("pointerdown", (event) => {
     if (!mapState) return;
+    if (mapState.hoverLabel) mapState.hoverLabel.hidden = true;
     mapState.dragging = true;
     mapState.movedDuringDrag = false;
     mapState.lastX = event.clientX;
@@ -1350,7 +1373,10 @@ function bindMapControls() {
   });
 
   viewport.addEventListener("pointermove", (event) => {
-    if (!mapState?.dragging) return;
+    if (!mapState?.dragging) {
+      updateStationHoverLabel(event);
+      return;
+    }
     const dx = event.clientX - mapState.lastX;
     const dy = event.clientY - mapState.lastY;
     mapState.lastX = event.clientX;
@@ -1380,6 +1406,41 @@ function bindMapControls() {
   }, { passive: false });
 
   window.addEventListener("resize", resizeMap);
+}
+
+function makeStationHoverLabel() {
+  const label = document.createElement("div");
+  label.className = "map-hover-label";
+  label.hidden = true;
+  elements.mapViewport.append(label);
+  return label;
+}
+
+function updateStationHoverLabel(event) {
+  if (!mapState?.hoverLabel) return;
+  const rect = elements.mapViewport.getBoundingClientRect();
+  mapState.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mapState.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  mapState.raycaster.setFromCamera(mapState.pointer, mapState.camera);
+  const stationHit = mapState.raycaster
+    .intersectObjects(mapState.stationGroup.children, false)
+    .find((hit) => hit.object.userData?.type === "station");
+
+  if (!stationHit) {
+    mapState.hoverLabel.hidden = true;
+    return;
+  }
+
+  const record = coordinates.find((item) => item.id === stationHit.object.userData.recordId);
+  if (!record) {
+    mapState.hoverLabel.hidden = true;
+    return;
+  }
+
+  mapState.hoverLabel.textContent = record.name;
+  mapState.hoverLabel.hidden = false;
+  mapState.hoverLabel.style.left = `${event.clientX - rect.left + 14}px`;
+  mapState.hoverLabel.style.top = `${event.clientY - rect.top + 14}px`;
 }
 
 function focusMapObjectFromPointer(event) {
@@ -1836,7 +1897,9 @@ elements.resultsList.addEventListener("click", async (event) => {
   }
 
   const button = event.target.closest("[data-copy-id]");
+  const interactiveControl = event.target.closest("button, a, input, label, select, textarea");
   if (!button && card) {
+    if (interactiveControl) return;
     openStationWindow(card.dataset.stationId);
     return;
   }

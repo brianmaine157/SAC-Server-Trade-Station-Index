@@ -4,7 +4,7 @@ const LOCAL_COMMENTS_KEY = "se-station-comments";
 const ADMIN_PASSWORD = "6846";
 const MAP_SCALE = 1 / 25000;
 const GRAVITY_FIELD_RADIUS_MULTIPLIER = 1.7182;
-const JUMP_EXIT_OFFSET_M = 1000;
+const JUMP_EXIT_OFFSET_M = 10000;
 const CRUISE_SPEED_MPS = 95;
 
 const PLANETS = [
@@ -134,6 +134,7 @@ let latestStationHitbox = null;
 let latestStationMarkerHitbox = null;
 let mapToast = null;
 let supabaseClient = null;
+let customFactions = {};
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -265,6 +266,24 @@ function configureStorage() {
   }
 }
 
+async function loadSharedFactions() {
+  if (!supabaseClient) return;
+  const { data, error } = await supabaseClient
+    .from("npc_factions")
+    .select("tag,name,category,sells,updated_at");
+  if (error) throw new Error(error.message);
+  customFactions = Object.fromEntries((data || []).map((faction) => [
+    normalizeFactionTag(faction.tag),
+    {
+      tag: normalizeFactionTag(faction.tag),
+      name: faction.name,
+      category: faction.category || "Unknown",
+      trade: faction.sells || "",
+      updated_at: faction.updated_at
+    }
+  ]));
+}
+
 async function loadStationRecord(stationId) {
   if (!supabaseClient) {
     return readJson(LOCAL_STORAGE_KEY, []).find((item) => item.id === stationId) || null;
@@ -328,7 +347,7 @@ function normalizeFactionTag(value) {
 
 function inferFaction(tag) {
   const normalized = normalizeFactionTag(tag);
-  const custom = readJson(LOCAL_FACTIONS_KEY, {})[normalized];
+  const custom = supabaseClient ? customFactions[normalized] : readJson(LOCAL_FACTIONS_KEY, {})[normalized];
   if (custom) return custom;
   if (normalized.length !== 4) return null;
   const prefix = ECONOMY_FACTION_PREFIXES[normalized.slice(0, 2)];
@@ -428,6 +447,7 @@ function economyIconClass(category) {
 async function renderStation() {
   const id = new URLSearchParams(window.location.search).get("id");
   try {
+    await loadSharedFactions();
     station = await loadStationRecord(id);
   } catch (error) {
     elements.title.textContent = "Station load failed";

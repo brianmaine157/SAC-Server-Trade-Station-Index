@@ -1,5 +1,5 @@
 const MAP_SCALE = 1 / 25000;
-const EXIT_OFFSET_M = 1000;
+const EXIT_OFFSET_M = 10000;
 const GRAVITY_FIELD_RADIUS_MULTIPLIER = 1.7182;
 
 const PLANETS = [
@@ -131,7 +131,7 @@ function buildAtlasPoints() {
         y: planet.y + direction.y * exitDistance,
         z: planet.z + direction.z * exitDistance,
         exitDistance,
-        note: "1 km outside natural gravity SOI"
+        note: "10 km outside natural gravity SOI"
       };
       point.rawText = makeGps(point.name, point);
       atlasPoints.push(point);

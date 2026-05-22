@@ -3,7 +3,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.npc_factions (
   tag text primary key check (tag ~ '^[A-Z0-9]{4}$'),
   name text not null,
-  category text not null check (category in ('Builder', 'Miner', 'Trader', 'Pirate', 'Hostile NPC', 'Scenario', 'Unknown')),
+  category text not null,
   sells text default '',
   updated_at timestamptz not null default now()
 );
@@ -471,10 +471,6 @@ begin
     raise exception 'Faction name is required.';
   end if;
 
-  if p_category not in ('Builder', 'Miner', 'Trader', 'Pirate', 'Hostile NPC', 'Scenario', 'Unknown') then
-    raise exception 'Invalid faction type.';
-  end if;
-
   insert into public.npc_factions (tag, name, category, sells, updated_at)
   values (upper(p_tag), trim(p_name), p_category, coalesce(p_sells, ''), now())
   on conflict (tag)
@@ -482,6 +478,10 @@ begin
                 category = excluded.category,
                 sells = excluded.sells,
                 updated_at = now();
+
+  update public.coordinates
+  set faction_name = trim(p_name)
+  where faction_tag = upper(p_tag);
 end;
 $$;
 

@@ -403,6 +403,10 @@ begin
                 category = excluded.category,
                 sells = excluded.sells,
                 updated_at = now();
+
+  update public.coordinates
+  set faction_name = trim(p_name)
+  where faction_tag = upper(p_tag);
 end;
 $$;
 

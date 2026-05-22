@@ -560,6 +560,21 @@ button.copied {
   text-align: center;
 }
 
+.map-hover-label {
+  position: absolute;
+  z-index: 6;
+  max-width: 260px;
+  padding: 7px 10px;
+  border: 1px solid rgba(238, 243, 248, 0.2);
+  border-radius: 6px;
+  background: rgba(5, 8, 13, 0.88);
+  color: #eef3f8;
+  font-size: 0.82rem;
+  font-weight: 700;
+  pointer-events: none;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32);
+}
+
 .map-list {
   display: grid;
   align-content: start;

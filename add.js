@@ -99,6 +99,7 @@ let supabaseClient = null;
 let pendingFactionResolver = null;
 let pendingFactionQueue = [];
 let activeFactionRequest = null;
+let customFactions = {};
 
 function parseGps(rawText) {
   const text = rawText.trim();
@@ -151,6 +152,7 @@ function inferFactionProfile(tag) {
 }
 
 function readLocalFactions() {
+  if (supabaseClient) return customFactions;
   try { return JSON.parse(localStorage.getItem(LOCAL_FACTIONS_KEY) || "{}"); } catch { return {}; }
 }
 
@@ -164,16 +166,51 @@ function readFaction(tag) {
   return readLocalFactions()[normalizedTag] || null;
 }
 
-function writeFaction(faction) {
+async function loadSharedFactions() {
+  if (!supabaseClient) {
+    customFactions = readLocalFactions();
+    return;
+  }
+  const { data, error } = await supabaseClient
+    .from("npc_factions")
+    .select("tag,name,category,sells,updated_at");
+  if (error) throw new Error(error.message);
+  customFactions = Object.fromEntries((data || []).map((faction) => [
+    normalizeFactionTag(faction.tag),
+    {
+      tag: normalizeFactionTag(faction.tag),
+      name: faction.name,
+      category: faction.category || "Unknown",
+      sells: faction.sells || "",
+      updated_at: faction.updated_at
+    }
+  ]));
+}
+
+async function writeFaction(faction) {
   const normalizedTag = normalizeFactionTag(faction.tag || "");
   if (!normalizedTag) return null;
-  const factions = readLocalFactions();
-  factions[normalizedTag] = {
+  const savedFaction = {
     tag: normalizedTag,
     name: faction.name.trim(),
     category: faction.category,
+    sells: faction.sells || "",
     updated_at: new Date().toISOString()
   };
+  if (supabaseClient) {
+    const { error } = await supabaseClient.rpc("upsert_npc_faction_admin", {
+      p_admin_code: ADMIN_PASSWORD,
+      p_tag: savedFaction.tag,
+      p_name: savedFaction.name,
+      p_category: savedFaction.category,
+      p_sells: savedFaction.sells
+    });
+    if (error) throw new Error(error.message);
+    customFactions[normalizedTag] = savedFaction;
+    return savedFaction;
+  }
+  const factions = readLocalFactions();
+  factions[normalizedTag] = savedFaction;
   writeLocalFactions(factions);
   return factions[normalizedTag];
 }
@@ -247,6 +284,7 @@ function configureStorage() {
     return;
   }
   coordinates = readLocalRecords();
+  customFactions = readLocalFactions();
   elements.storageMode.textContent = "Local demo mode";
   elements.storageDetail.textContent = "Local testing only. Add ?shared=1 to the URL to use Supabase here.";
 }
@@ -425,6 +463,13 @@ elements.form.addEventListener("submit", async (event) => {
   const skipped = [];
   const pendingRecords = [];
 
+  try {
+    await loadSharedFactions();
+  } catch (error) {
+    setMessage(`Could not load faction list: ${error.message}`, "bad");
+    return;
+  }
+
   for (const [index, line] of lines.entries()) {
     try {
       const record = buildRecord(parseGps(line), {
@@ -477,7 +522,7 @@ elements.sampleButton.addEventListener("click", () => {
   elements.gpsInput.focus();
 });
 
-elements.factionForm?.addEventListener("submit", (event) => {
+elements.factionForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const tag = normalizeFactionTag(elements.factionTagInput.value);
   const name = elements.factionNameInput.value.trim();
@@ -486,12 +531,18 @@ elements.factionForm?.addEventListener("submit", (event) => {
     elements.factionMessage.textContent = "Faction name is required.";
     return;
   }
-  closeFactionModal(writeFaction({
-    tag: activeFactionRequest?.tag || tag,
-    name,
-    category: elements.factionTypeInput.value,
-    sells: ""
-  }));
+  try {
+    const saved = await writeFaction({
+      tag: activeFactionRequest?.tag || tag,
+      name,
+      category: elements.factionTypeInput.value,
+      sells: ""
+    });
+    closeFactionModal(saved);
+  } catch (error) {
+    elements.factionMessage.className = "message bad";
+    elements.factionMessage.textContent = error.message;
+  }
 });
 
 elements.factionCancelButton?.addEventListener("click", () => closeFactionModal(null));

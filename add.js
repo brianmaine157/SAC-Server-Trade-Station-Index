@@ -356,7 +356,7 @@ function missingFactionRequests(records) {
   const requests = new Map();
   for (const record of records) {
     const tag = normalizeFactionTag(record.faction_tag || "");
-    if (!tag || readFaction(tag)) continue;
+    if (!tag || factionForTag(tag)) continue;
     if (!requests.has(tag)) {
       requests.set(tag, { tag, stationNames: [] });
     }
@@ -498,7 +498,7 @@ elements.form.addEventListener("submit", async (event) => {
 
   for (const item of pendingRecords) {
     try {
-      const faction = readFaction(item.record.faction_tag);
+      const faction = factionForTag(item.record.faction_tag);
       if (faction) item.record.faction_name = faction.name;
       const result = await submitRecord(item.record);
       if (result.inserted === false) skipped.push({ line: item.line, message: result.message || "Already listed within 1 km." });

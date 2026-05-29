@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Delivery Route Optimizer - SAC Star System Hub</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="site-nav-link" href="index.html">Trade Station Index</a>
+        <a class="site-nav-link" href="factions.html">NPC Faction Index</a>
+        <a class="site-nav-link" href="atlas.html">Star System Navigator</a>
+        <a class="site-nav-link active" href="routes.html">Delivery Route Optimizer</a>
+        <a class="site-nav-link" href="center.html">3 Point Center</a>
+      </nav>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">SAC Star System Hub</p>
+          <h1>Delivery Route Optimizer</h1>
+          <p class="lede">Paste delivery GPS coordinates to calculate an efficient stop order and view the route through the star system.</p>
+        </div>
+        <div class="hero-side">
+          <a class="button-link" href="add.html">Add Trade Stations</a>
+        </div>
+      </section>
+
+      <section class="map-panel">
+        <div class="section-heading">
+          <h2>3D Route Map</h2>
+          <button class="ghost" id="resetRouteMapButton" type="button">Reset View</button>
+        </div>
+        <div class="map-layout">
+          <div class="map-viewport" id="routeMapViewport">
+            <div class="map-fallback" id="routeMapFallback">Loading map...</div>
+          </div>
+          <div class="map-list" id="routeMapList"></div>
+        </div>
+      </section>
+
+      <section class="atlas-grid">
+        <form class="submit-panel" id="optimizerForm">
+          <h2>Route Input</h2>
+          <label for="optimizerInput">GPS stops</label>
+          <textarea id="optimizerInput" rows="10" placeholder="GPS:Start:0:0:0:#FFFFFFFF:&#10;GPS:Delivery 1:100000:0:0:#FFFFFFFF:&#10;GPS:Delivery 2:0:100000:0:#FFFFFFFF:"></textarea>
+
+          <div class="field-grid">
+            <label>
+              Velocity, m/s
+              <input id="optimizerVelocityInput" type="number" min="1" step="1" value="100">
+            </label>
+            <label>
+              Trip
+              <select id="optimizerTripModeInput">
+                <option value="1">One way</option>
+                <option value="2">Two way</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Optimize Route</button>
+            <button class="secondary" id="clearOptimizerButton" type="button">Clear Route</button>
+          </div>
+          <div class="preview" id="optimizerSummary">Paste two or more GPS coordinates.</div>
+        </form>
+
+        <section class="results-panel atlas-points-panel">
+          <div class="section-heading">
+            <h2>Optimized Stops</h2>
+            <button class="ghost" id="copyOptimizedRouteButton" type="button">Copy Route</button>
+          </div>
+          <div class="results atlas-point-list" id="optimizedRouteList">
+            <div class="empty">No route calculated yet.</div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="config.js"></script>
+    <script src="routes.js"></script>
+  </body>
+</html>

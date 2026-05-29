@@ -287,6 +287,8 @@ function bindMapControls() {
   const viewport = elements.mapViewport;
   viewport.addEventListener("pointerdown", (event) => {
     if (!mapState) return;
+    event.preventDefault();
+    mapState.pointerButton = event.button;
     mapState.dragging = true;
     mapState.movedDuringDrag = false;
     mapState.lastX = event.clientX;
@@ -295,6 +297,7 @@ function bindMapControls() {
   });
   viewport.addEventListener("pointermove", (event) => {
     if (!mapState?.dragging) return;
+    event.preventDefault();
     const dx = event.clientX - mapState.lastX;
     const dy = event.clientY - mapState.lastY;
     mapState.lastX = event.clientX;
@@ -309,6 +312,19 @@ function bindMapControls() {
     if (!mapState.movedDuringDrag) focusMapObjectFromPointer(event);
     mapState.dragging = false;
     viewport.releasePointerCapture(event.pointerId);
+  });
+  viewport.addEventListener("pointercancel", () => {
+    if (!mapState) return;
+    mapState.dragging = false;
+  });
+  viewport.addEventListener("lostpointercapture", () => {
+    if (!mapState) return;
+    mapState.dragging = false;
+  });
+  viewport.addEventListener("contextmenu", (event) => {
+    if (!mapState) return;
+    event.preventDefault();
+    focusMapObjectFromPointer(event);
   });
   viewport.addEventListener("wheel", (event) => {
     if (!mapState) return;

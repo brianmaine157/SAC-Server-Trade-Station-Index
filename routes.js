@@ -1,6 +1,8 @@
 const MAP_SCALE = 1 / 25000;
-const EXIT_OFFSET_M = 10000;
 const GRAVITY_FIELD_RADIUS_MULTIPLIER = 1.7182;
+const JUMP_EXIT_OFFSET_M = 10000;
+const LOCAL_STORAGE_KEY = "se-coordinate-registry";
+const STATION_MATCH_RADIUS_M = 1000;
 
 const PLANETS = [
   { name: "EarthLike", x: 0.5, y: 0.5, z: 0.5, radius: 60000, atmosphereHeight: 60000 },
@@ -24,44 +26,32 @@ const PLANET_COLORS = {
   Pertam: 0xd7a96b
 };
 
-const DIRECTIONS = [
-  { label: "X+", x: 1, y: 0, z: 0 },
-  { label: "X-", x: -1, y: 0, z: 0 },
-  { label: "Y+", x: 0, y: 1, z: 0 },
-  { label: "Y-", x: 0, y: -1, z: 0 },
-  { label: "Z+", x: 0, y: 0, z: 1 },
-  { label: "Z-", x: 0, y: 0, z: -1 }
-];
-
 const elements = {
-  mapViewport: document.querySelector("#atlasMapViewport"),
-  mapFallback: document.querySelector("#atlasMapFallback"),
-  mapList: document.querySelector("#atlasMapList"),
-  resetMapButton: document.querySelector("#resetAtlasMapButton"),
-  pointList: document.querySelector("#atlasPointList"),
-  planetFilter: document.querySelector("#atlasPlanetFilter"),
-  directionFilter: document.querySelector("#atlasDirectionFilter"),
-  copyAllButton: document.querySelector("#copyAllAtlasPointsButton"),
-  routeForm: document.querySelector("#routeForm"),
-  routeInput: document.querySelector("#routeInput"),
-  velocityInput: document.querySelector("#velocityInput"),
-  tripModeInput: document.querySelector("#tripModeInput"),
-  routeSummary: document.querySelector("#routeSummary"),
-  clearRouteButton: document.querySelector("#clearRouteButton")
+  mapViewport: document.querySelector("#routeMapViewport"),
+  mapFallback: document.querySelector("#routeMapFallback"),
+  mapList: document.querySelector("#routeMapList"),
+  resetMapButton: document.querySelector("#resetRouteMapButton"),
+  form: document.querySelector("#optimizerForm"),
+  input: document.querySelector("#optimizerInput"),
+  velocityInput: document.querySelector("#optimizerVelocityInput"),
+  tripModeInput: document.querySelector("#optimizerTripModeInput"),
+  summary: document.querySelector("#optimizerSummary"),
+  clearButton: document.querySelector("#clearOptimizerButton"),
+  copyButton: document.querySelector("#copyOptimizedRouteButton"),
+  resultList: document.querySelector("#optimizedRouteList")
 };
 
 let mapState = null;
-let atlasPoints = [];
-let routePoints = [];
+let originalStops = [];
+let optimizedStops = [];
+let knownStations = [];
+let supabaseClient = null;
+let stationLoadPromise = null;
 
 function parseGps(rawText) {
   const text = rawText.trim();
   const match = text.match(/^GPS:([^:]+):(-?\d+(?:\.\d+)?):(-?\d+(?:\.\d+)?):(-?\d+(?:\.\d+)?):(#?[0-9a-fA-F]{8})?:?$/);
-
-  if (!match) {
-    throw new Error("Use Space Engineers GPS lines like GPS:Name:X:Y:Z:#AARRGGBB:");
-  }
-
+  if (!match) throw new Error("Use Space Engineers GPS lines like GPS:Name:X:Y:Z:#AARRGGBB:");
   return {
     rawText: text,
     name: match[1].trim(),
@@ -72,19 +62,135 @@ function parseGps(rawText) {
   };
 }
 
-function splitGpsInput(rawText) {
-  return rawText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+function gpsWithName(point, name) {
+  return `GPS:${name}:${point.x}:${point.y}:${point.z}:${point.color}:`;
 }
 
-function makeGps(name, point, color = "#FF49D6B5") {
-  return `GPS:${name}:${point.x.toFixed(2)}:${point.y.toFixed(2)}:${point.z.toFixed(2)}:${color}:`;
+function readLocalStations() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function shouldUseSupabase() {
+  return Boolean(window.SUPABASE_URL && window.SUPABASE_ANON_KEY && window.supabase);
+}
+
+function hasCoordinatePosition(station) {
+  return station &&
+    Number.isFinite(Number(station.x)) &&
+    Number.isFinite(Number(station.y)) &&
+    Number.isFinite(Number(station.z));
+}
+
+async function loadKnownStations() {
+  knownStations = readLocalStations().filter(hasCoordinatePosition);
+
+  if (!shouldUseSupabase()) return;
+
+  supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+  const { data, error } = await supabaseClient
+    .from("coordinates")
+    .select("id,name,x,y,z,location_type,color")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  const localIds = new Set(knownStations.map((station) => station.id).filter(Boolean));
+  for (const station of data || []) {
+    if (station.id && localIds.has(station.id)) continue;
+    if (hasCoordinatePosition(station)) knownStations.push(station);
+  }
+}
+
+function nearestKnownStation(point) {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const station of knownStations) {
+    const distance = distance3d(point, station);
+    if (distance < bestDistance) {
+      best = station;
+      bestDistance = distance;
+    }
+  }
+
+  return best && bestDistance <= STATION_MATCH_RADIUS_M
+    ? { station: best, distance: bestDistance }
+    : null;
+}
+
+function applyKnownStationName(point) {
+  const match = nearestKnownStation(point);
+  if (!match || !match.station.name) return point;
+
+  const orbitalCoordinate = stationOrbitalCoordinate(match.station, point.color);
+  const updated = {
+    ...point,
+    originalName: match.station.name === point.name ? "" : point.name,
+    name: match.station.name,
+    matchedStationId: match.station.id || null,
+    matchedDistance: match.distance,
+    orbitalCoordinate
+  };
+  updated.rawText = gpsWithName(updated, updated.name);
+  return updated;
+}
+
+function stationOrbitalCoordinate(station, fallbackColor = "#FFFFFFFF") {
+  if (station.location_type !== "surface") return null;
+  const nearest = nearestPlanet(station);
+  const planet = nearest?.planet;
+  if (!planet) return null;
+
+  const distance = nearest.distance || 1;
+  const exitDistance = planet.radius * GRAVITY_FIELD_RADIUS_MULTIPLIER + JUMP_EXIT_OFFSET_M;
+  const direction = {
+    x: (Number(station.x) - planet.x) / distance,
+    y: (Number(station.y) - planet.y) / distance,
+    z: (Number(station.z) - planet.z) / distance
+  };
+  const point = {
+    name: `${station.name} Orbital Coordinate`,
+    x: planet.x + direction.x * exitDistance,
+    y: planet.y + direction.y * exitDistance,
+    z: planet.z + direction.z * exitDistance,
+    color: normalizeGpsColor(station.color || fallbackColor)
+  };
+
+  return {
+    planet: planet.name,
+    transferDistance: distance3d(station, point),
+    rawText: `GPS:${point.name}:${point.x.toFixed(3)}:${point.y.toFixed(3)}:${point.z.toFixed(3)}:${point.color}:`
+  };
+}
+
+function nearestPlanet(point) {
+  return PLANETS
+    .map((planet) => ({ planet, distance: distance3d(point, planet) }))
+    .sort((a, b) => a.distance - b.distance)[0] || null;
+}
+
+function normalizeGpsColor(color) {
+  const value = String(color || "#FFFFFFFF").trim();
+  return /^#[0-9a-fA-F]{8}$/.test(value) ? value.toUpperCase() : "#FFFFFFFF";
+}
+
+function splitGpsInput(rawText) {
+  return rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 
 function distance3d(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function routeDistance(points) {
+  let distance = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    distance += distance3d(points[index - 1], points[index]);
+  }
+  return distance;
 }
 
 function formatDistance(value) {
@@ -117,61 +223,74 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function buildAtlasPoints() {
-  atlasPoints = [];
-  for (const planet of PLANETS) {
-    const exitDistance = planet.radius * GRAVITY_FIELD_RADIUS_MULTIPLIER + EXIT_OFFSET_M;
-    for (const direction of DIRECTIONS) {
-      const point = {
-        id: `${planet.name}-${direction.label}`,
-        name: `${planet.name} ${direction.label} Planet Jump Coord`,
-        planet: planet.name,
-        direction: direction.label,
-        x: planet.x + direction.x * exitDistance,
-        y: planet.y + direction.y * exitDistance,
-        z: planet.z + direction.z * exitDistance,
-        exitDistance,
-        note: "10 km outside natural gravity SOI"
-      };
-      point.rawText = makeGps(point.name, point);
-      atlasPoints.push(point);
+function optimizeRoute(points) {
+  if (points.length <= 2) return points.slice();
+  if (points.length <= 9) return exactRoute(points);
+  return twoOptRoute(nearestNeighborRoute(points));
+}
+
+function exactRoute(points) {
+  const start = points[0];
+  const remaining = points.slice(1);
+  let bestRoute = null;
+  let bestDistance = Infinity;
+
+  function visit(path, unused) {
+    if (!unused.length) {
+      const candidate = [start, ...path];
+      const distance = routeDistance(candidate);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestRoute = candidate;
+      }
+      return;
+    }
+
+    for (let index = 0; index < unused.length; index += 1) {
+      visit([...path, unused[index]], unused.filter((_, itemIndex) => itemIndex !== index));
     }
   }
+
+  visit([], remaining);
+  return bestRoute || points.slice();
 }
 
-function populateFilters() {
-  elements.planetFilter.innerHTML = ["all", ...PLANETS.map((planet) => planet.name)].map((name) => {
-    const label = name === "all" ? "All planets" : name;
-    return `<option value="${name}">${label}</option>`;
-  }).join("");
+function nearestNeighborRoute(points) {
+  const route = [points[0]];
+  const unused = points.slice(1);
+  while (unused.length) {
+    const current = route[route.length - 1];
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    for (let index = 0; index < unused.length; index += 1) {
+      const distance = distance3d(current, unused[index]);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+    route.push(unused.splice(bestIndex, 1)[0]);
+  }
+  return route;
 }
 
-function filteredAtlasPoints() {
-  const planet = elements.planetFilter.value;
-  const direction = elements.directionFilter.value;
-  return atlasPoints.filter((point) => {
-    return (planet === "all" || point.planet === planet) &&
-      (direction === "all" || point.direction === direction);
-  });
-}
-
-function renderAtlasPoints() {
-  const points = filteredAtlasPoints();
-  elements.pointList.innerHTML = points.map((point) => `
-    <article class="atlas-point-card" data-atlas-point-card="${escapeHtml(point.id)}">
-      <div>
-        <h3>${escapeHtml(point.name)}</h3>
-        <div class="gps-line">${escapeHtml(point.rawText)}</div>
-        <div class="meta">
-          <span class="pill">${escapeHtml(point.planet)}</span>
-          <span class="pill">${escapeHtml(point.direction)}</span>
-          <span class="pill">${escapeHtml(point.note)}</span>
-        </div>
-      </div>
-      <button class="copy-button" type="button" data-copy-point="${escapeHtml(point.id)}">Copy</button>
-    </article>
-  `).join("");
-  updateAtlasMapPoints(points);
+function twoOptRoute(points) {
+  const route = points.slice();
+  let improved = true;
+  while (improved) {
+    improved = false;
+    for (let i = 1; i < route.length - 2; i += 1) {
+      for (let j = i + 1; j < route.length - 1; j += 1) {
+        const current = distance3d(route[i - 1], route[i]) + distance3d(route[j], route[j + 1]);
+        const swapped = distance3d(route[i - 1], route[j]) + distance3d(route[i], route[j + 1]);
+        if (swapped + 0.001 < current) {
+          route.splice(i, j - i + 1, ...route.slice(i, j + 1).reverse());
+          improved = true;
+        }
+      }
+    }
+  }
+  return route;
 }
 
 function initMap() {
@@ -183,7 +302,6 @@ function initMap() {
   const THREE = window.THREE;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05080d);
-
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -199,9 +317,8 @@ function initMap() {
 
   const planetGroup = new THREE.Group();
   const labelGroup = new THREE.Group();
-  const atlasPointGroup = new THREE.Group();
   const routeGroup = new THREE.Group();
-  root.add(planetGroup, labelGroup, atlasPointGroup, routeGroup);
+  root.add(planetGroup, labelGroup, routeGroup);
 
   const grid = new THREE.GridHelper(520, 26, 0x2c3643, 0x17202b);
   grid.position.y = -12;
@@ -217,29 +334,15 @@ function initMap() {
     mesh.userData = { type: "planet", planet };
     planetGroup.add(mesh);
 
-    const atmosphereRadius = Math.max(radius + 0.06, (planet.radius + planet.atmosphereHeight) * MAP_SCALE);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(atmosphereRadius * 1.01, atmosphereRadius * 1.025, 64),
-      new THREE.MeshBasicMaterial({ color: 0x49d6b5, transparent: true, opacity: planet.atmosphereHeight > 0 ? 0.2 : 0.07, side: THREE.DoubleSide })
-    );
-    ring.position.copy(mesh.position);
-    ring.rotation.x = Math.PI / 2;
-    planetGroup.add(ring);
-
     const gravityShell = new THREE.Mesh(
       new THREE.SphereGeometry(radius * GRAVITY_FIELD_RADIUS_MULTIPLIER, 32, 18),
-      new THREE.MeshBasicMaterial({
-        color: 0x49d6b5,
-        transparent: true,
-        opacity: 0.055,
-        depthWrite: false
-      })
+      new THREE.MeshBasicMaterial({ color: 0x49d6b5, transparent: true, opacity: 0.055, depthWrite: false })
     );
     gravityShell.position.copy(mesh.position);
     planetGroup.add(gravityShell);
 
-    const label = makeLabelSprite(planet.name, "#eef3f8");
     const labelPosition = labelCalloutPosition(planet, radius);
+    const label = makeLabelSprite(planet.name, "#eef3f8");
     label.position.copy(labelPosition);
     label.userData = {
       type: "planet-label",
@@ -259,10 +362,8 @@ function initMap() {
     scene,
     camera,
     renderer,
-    root,
     planetGroup,
     labelGroup,
-    atlasPointGroup,
     routeGroup,
     raycaster: new THREE.Raycaster(),
     pointer: new THREE.Vector2(),
@@ -304,34 +405,12 @@ function makeLabelSprite(text, color) {
   context.fill();
   context.fillStyle = color;
   context.fillText(text, canvas.width / 2, 64);
-
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(25.5, 8.5, 1);
   return sprite;
-}
-
-function labelCalloutPosition(planet, radius) {
-  const THREE = window.THREE;
-  const moonScale = planet.radius < 20000;
-  const direction = new THREE.Vector3(
-    planet.x >= 0 ? 1 : -1,
-    moonScale ? 1.35 : 1.05,
-    planet.z >= 0 ? 1 : -1
-  ).normalize();
-  const distance = radius + (moonScale ? 14 : 8);
-  return mapPosition(planet).add(direction.multiplyScalar(distance));
-}
-
-function makeLeaderLine(start, end) {
-  const THREE = window.THREE;
-  const geometry = new THREE.BufferGeometry().setFromPoints([start.clone(), end.clone()]);
-  return new THREE.Line(
-    geometry,
-    new THREE.LineBasicMaterial({ color: 0x9ba7b4, transparent: true, opacity: 0.55 })
-  );
 }
 
 function roundRect(context, x, y, width, height, radius) {
@@ -348,20 +427,36 @@ function roundRect(context, x, y, width, height, radius) {
   context.closePath();
 }
 
+function labelCalloutPosition(planet, radius) {
+  const THREE = window.THREE;
+  const moonScale = planet.radius < 20000;
+  const direction = new THREE.Vector3(
+    planet.x >= 0 ? 1 : -1,
+    moonScale ? 1.35 : 1.05,
+    planet.z >= 0 ? 1 : -1
+  ).normalize();
+  return mapPosition(planet).add(direction.multiplyScalar(radius + (moonScale ? 14 : 8)));
+}
+
+function makeLeaderLine(start, end) {
+  const THREE = window.THREE;
+  return new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([start.clone(), end.clone()]),
+    new THREE.LineBasicMaterial({ color: 0x9ba7b4, transparent: true, opacity: 0.55 })
+  );
+}
+
 function bindMapControls() {
   const viewport = elements.mapViewport;
-
   viewport.addEventListener("pointerdown", (event) => {
     if (!mapState) return;
     event.preventDefault();
-    mapState.pointerButton = event.button;
     mapState.dragging = true;
     mapState.movedDuringDrag = false;
     mapState.lastX = event.clientX;
     mapState.lastY = event.clientY;
     viewport.setPointerCapture(event.pointerId);
   });
-
   viewport.addEventListener("pointermove", (event) => {
     if (!mapState?.dragging) return;
     event.preventDefault();
@@ -369,60 +464,50 @@ function bindMapControls() {
     const dy = event.clientY - mapState.lastY;
     mapState.lastX = event.clientX;
     mapState.lastY = event.clientY;
-    if (Math.abs(dx) + Math.abs(dy) > 3) {
-      mapState.movedDuringDrag = true;
-    }
+    if (Math.abs(dx) + Math.abs(dy) > 3) mapState.movedDuringDrag = true;
     mapState.yaw -= dx * 0.006;
     mapState.pitch = Math.max(-1.25, Math.min(1.25, mapState.pitch + dy * 0.006));
     updateCamera();
   });
-
   viewport.addEventListener("pointerup", (event) => {
     if (!mapState) return;
-    if (!mapState.movedDuringDrag) {
-      focusMapObjectFromPointer(event);
-    }
+    if (!mapState.movedDuringDrag) focusMapObjectFromPointer(event);
     mapState.dragging = false;
     viewport.releasePointerCapture(event.pointerId);
   });
-
   viewport.addEventListener("pointercancel", () => {
     if (!mapState) return;
     mapState.dragging = false;
   });
-
   viewport.addEventListener("lostpointercapture", () => {
     if (!mapState) return;
     mapState.dragging = false;
   });
-
   viewport.addEventListener("contextmenu", (event) => {
     if (!mapState) return;
     event.preventDefault();
     focusMapObjectFromPointer(event);
   });
-
   viewport.addEventListener("wheel", (event) => {
     if (!mapState) return;
     event.preventDefault();
     mapState.distance = Math.max(14, Math.min(900, mapState.distance + event.deltaY * 0.18));
     updateCamera();
   }, { passive: false });
-
   window.addEventListener("resize", resizeMap);
 }
 
 function focusMapObjectFromPointer(event) {
-  if (!mapState) return;
   const rect = elements.mapViewport.getBoundingClientRect();
   mapState.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   mapState.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   mapState.raycaster.setFromCamera(mapState.pointer, mapState.camera);
 
-  const atlasHits = mapState.raycaster.intersectObjects(mapState.atlasPointGroup.children, false);
-  if (atlasHits[0]) {
-    const point = atlasPoints.find((item) => item.id === atlasHits[0].object.userData.pointId);
-    if (point) selectAtlasPoint(point);
+  const routeHit = mapState.raycaster.intersectObjects(mapState.routeGroup.children, false)
+    .find((hit) => hit.object.userData?.type === "route-marker");
+  if (routeHit) {
+    const point = optimizedStops[routeHit.object.userData.routeIndex];
+    if (point) focusPoint(point);
     return;
   }
 
@@ -436,37 +521,19 @@ function focusMapObjectFromPointer(event) {
 }
 
 function focusPlanet(planet) {
-  if (!mapState) return;
-  const position = mapPosition(planet);
   const radius = Math.max(0.32, planet.radius * MAP_SCALE);
-  mapState.target.copy(position);
-  mapState.distance = planet.radius < 20000
-    ? Math.max(12, radius * 5)
-    : Math.max(28, radius * 10);
+  mapState.target.copy(mapPosition(planet));
+  mapState.distance = planet.radius < 20000 ? Math.max(12, radius * 5) : Math.max(28, radius * 10);
   updateCamera();
 }
 
 function focusPoint(point) {
-  if (!mapState) return;
   mapState.target.copy(mapPosition(point));
   mapState.distance = 36;
   updateCamera();
 }
 
-function selectAtlasPoint(point) {
-  focusPoint(point);
-  const selector = `[data-atlas-point-card="${CSS.escape(point.id)}"]`;
-  const card = document.querySelector(selector);
-  if (!card) return;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
-  card.classList.add("selected");
-  setTimeout(() => {
-    card.classList.remove("selected");
-  }, 1400);
-}
-
 function updateCamera() {
-  if (!mapState) return;
   const { camera, target, yaw, pitch, distance } = mapState;
   const horizontal = Math.cos(pitch) * distance;
   camera.position.set(
@@ -486,9 +553,7 @@ function updateLabelScale() {
     if (!label.userData?.baseScale) continue;
     label.visible = shouldShowLabel(label, bodyDisks);
     label.scale.copy(label.userData.baseScale).multiplyScalar(zoomScale);
-    if (label.visible) {
-      placeSafeLabel(label, bodyDisks);
-    }
+    if (label.visible) placeSafeLabel(label, bodyDisks);
     if (label.userData?.leaderLine) {
       label.userData.leaderLine.visible = label.visible;
       updateLeaderLine(label.userData.leaderLine, mapPosition(label.userData.planet), label.position);
@@ -498,15 +563,11 @@ function updateLabelScale() {
 
 function shouldShowLabel(label, bodyDisks) {
   if (label.userData?.isMoonScale && mapState.distance >= 320) return false;
-  const planet = label.userData.planet;
-  const disk = bodyDisks.find((item) => item.planet.name === planet.name);
+  const disk = bodyDisks.find((item) => item.planet.name === label.userData.planet.name);
   if (!disk || disk.behind) return false;
   const rect = elements.mapViewport.getBoundingClientRect();
   const margin = 80;
-  return disk.x >= -margin &&
-    disk.x <= rect.width + margin &&
-    disk.y >= -margin &&
-    disk.y <= rect.height + margin;
+  return disk.x >= -margin && disk.x <= rect.width + margin && disk.y >= -margin && disk.y <= rect.height + margin;
 }
 
 function getProjectedBodyDisks() {
@@ -516,7 +577,6 @@ function getProjectedBodyDisks() {
   const height = Math.max(1, rect.height);
   const cameraRight = new mapState.THREE.Vector3();
   mapState.camera.matrixWorld.extractBasis(cameraRight, new mapState.THREE.Vector3(), new mapState.THREE.Vector3());
-
   for (const planet of PLANETS) {
     const radius = Math.max(0.32, planet.radius * MAP_SCALE);
     const center = mapPosition(planet);
@@ -531,7 +591,6 @@ function getProjectedBodyDisks() {
       radius: Math.max(6, Math.hypot(edgeScreen.x - centerScreen.x, edgeScreen.y - centerScreen.y) + 4)
     });
   }
-
   return disks;
 }
 
@@ -542,16 +601,11 @@ function placeSafeLabel(label, bodyDisks) {
   const planet = label.userData.planet;
   const centerWorld = mapPosition(planet);
   const centerScreen = worldToScreen(centerWorld, width, height);
-  const viewportCenter = { x: width / 2, y: height / 2 };
-  const direction = normalizeScreenVector({
-    x: centerScreen.x - viewportCenter.x,
-    y: centerScreen.y - viewportCenter.y
-  }, planet);
+  const direction = normalizeScreenVector({ x: centerScreen.x - width / 2, y: centerScreen.y - height / 2 }, planet);
   const ownDisk = bodyDisks.find((disk) => disk.planet.name === planet.name);
   const box = measureLabelBox(label, width, height);
   let distance = (ownDisk?.radius || 20) + Math.max(box.width, box.height) * 0.58 + 14;
   let target = { x: centerScreen.x + direction.x * distance, y: centerScreen.y + direction.y * distance };
-
   for (let attempt = 0; attempt < 18; attempt += 1) {
     const labelBox = {
       left: target.x - box.width / 2,
@@ -564,13 +618,9 @@ function placeSafeLabel(label, bodyDisks) {
     distance += collision.radius + 18;
     target = { x: centerScreen.x + direction.x * distance, y: centerScreen.y + direction.y * distance };
   }
-
   const desired = screenToWorld(target.x, target.y, centerWorld, width, height);
-  if (!label.userData.targetPosition) {
-    label.userData.targetPosition = desired.clone();
-  } else {
-    label.userData.targetPosition.copy(desired);
-  }
+  if (!label.userData.targetPosition) label.userData.targetPosition = desired.clone();
+  else label.userData.targetPosition.copy(desired);
   label.position.lerp(label.userData.targetPosition, 0.18);
 }
 
@@ -587,16 +637,11 @@ function measureLabelBox(label, width, height) {
   const cameraRight = new THREE.Vector3();
   const cameraUp = new THREE.Vector3();
   mapState.camera.matrixWorld.extractBasis(cameraRight, cameraUp, new THREE.Vector3());
-  const halfWidth = label.scale.x / 2;
-  const halfHeight = label.scale.y / 2;
-  const left = worldToScreen(center.clone().add(cameraRight.clone().multiplyScalar(-halfWidth)), width, height);
-  const right = worldToScreen(center.clone().add(cameraRight.clone().multiplyScalar(halfWidth)), width, height);
-  const top = worldToScreen(center.clone().add(cameraUp.clone().multiplyScalar(halfHeight)), width, height);
-  const bottom = worldToScreen(center.clone().add(cameraUp.clone().multiplyScalar(-halfHeight)), width, height);
-  return {
-    width: Math.max(72, Math.abs(right.x - left.x)),
-    height: Math.max(28, Math.abs(bottom.y - top.y))
-  };
+  const left = worldToScreen(center.clone().add(cameraRight.clone().multiplyScalar(-label.scale.x / 2)), width, height);
+  const right = worldToScreen(center.clone().add(cameraRight.clone().multiplyScalar(label.scale.x / 2)), width, height);
+  const top = worldToScreen(center.clone().add(cameraUp.clone().multiplyScalar(label.scale.y / 2)), width, height);
+  const bottom = worldToScreen(center.clone().add(cameraUp.clone().multiplyScalar(-label.scale.y / 2)), width, height);
+  return { width: Math.max(72, Math.abs(right.x - left.x)), height: Math.max(28, Math.abs(bottom.y - top.y)) };
 }
 
 function rectIntersectsCircle(rect, circle) {
@@ -607,21 +652,13 @@ function rectIntersectsCircle(rect, circle) {
 
 function worldToScreen(position, width, height) {
   const projected = position.clone().project(mapState.camera);
-  return {
-    x: (projected.x * 0.5 + 0.5) * width,
-    y: (-projected.y * 0.5 + 0.5) * height,
-    z: projected.z
-  };
+  return { x: (projected.x * 0.5 + 0.5) * width, y: (-projected.y * 0.5 + 0.5) * height, z: projected.z };
 }
 
 function screenToWorld(x, y, depthPoint, width, height) {
   const THREE = mapState.THREE;
   const projectedDepth = depthPoint.clone().project(mapState.camera).z;
-  return new THREE.Vector3(
-    (x / width) * 2 - 1,
-    -(y / height) * 2 + 1,
-    projectedDepth
-  ).unproject(mapState.camera);
+  return new THREE.Vector3((x / width) * 2 - 1, -(y / height) * 2 + 1, projectedDepth).unproject(mapState.camera);
 }
 
 function updateLeaderLine(line, start, end) {
@@ -650,15 +687,8 @@ function animateMap() {
 function updateMarkerScale() {
   if (!mapState) return;
   const scale = Math.max(0.13, Math.min(2.2, mapState.distance / 340));
-  for (const marker of mapState.atlasPointGroup.children) {
-    if (marker.userData?.type === "atlas-point") {
-      marker.scale.setScalar(scale);
-    }
-  }
   for (const marker of mapState.routeGroup.children) {
-    if (marker.userData?.type === "route-marker") {
-      marker.scale.setScalar(scale);
-    }
+    if (marker.userData?.type === "route-marker") marker.scale.setScalar(scale);
   }
 }
 
@@ -671,25 +701,6 @@ function resetMapView() {
   updateCamera();
 }
 
-function updateAtlasMapPoints(points) {
-  if (!mapState) return;
-  const THREE = mapState.THREE;
-  while (mapState.atlasPointGroup.children.length) {
-    const child = mapState.atlasPointGroup.children.pop();
-    child.geometry?.dispose?.();
-    child.material?.dispose?.();
-  }
-
-  const geometry = new THREE.SphereGeometry(0.7, 14, 8);
-  const material = new THREE.MeshStandardMaterial({ color: 0x49d6b5, emissive: 0x49d6b5, emissiveIntensity: 0.5 });
-  for (const point of points) {
-    const marker = new THREE.Mesh(geometry, material);
-    marker.position.copy(mapPosition(point));
-    marker.userData = { type: "atlas-point", pointId: point.id };
-    mapState.atlasPointGroup.add(marker);
-  }
-}
-
 function drawRoute(points) {
   if (!mapState) return;
   const THREE = mapState.THREE;
@@ -698,93 +709,135 @@ function drawRoute(points) {
     child.geometry?.dispose?.();
     child.material?.dispose?.();
   }
-
   if (points.length < 2) return;
 
   const geometry = new THREE.BufferGeometry().setFromPoints(points.map(mapPosition));
-  const line = new THREE.Line(
+  mapState.routeGroup.add(new THREE.Line(
     geometry,
-    new THREE.LineBasicMaterial({ color: 0xfff2a8, linewidth: 2 })
-  );
-  mapState.routeGroup.add(line);
+    new THREE.LineBasicMaterial({ color: 0xfff2a8 })
+  ));
 
-  const markerGeometry = new THREE.SphereGeometry(1.05, 16, 10);
-  const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xfff2a8, emissive: 0xffd166, emissiveIntensity: 0.65 });
-  for (const point of points) {
-    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+  points.forEach((point, index) => {
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(index === 0 ? 1.25 : 1.05, 16, 10),
+      new THREE.MeshStandardMaterial({
+        color: index === 0 ? 0x49d6b5 : 0xfff2a8,
+        emissive: index === 0 ? 0x49d6b5 : 0xffd166,
+        emissiveIntensity: 0.65
+      })
+    );
     marker.position.copy(mapPosition(point));
-    marker.userData = { type: "route-marker" };
+    marker.userData = { type: "route-marker", routeIndex: index };
     mapState.routeGroup.add(marker);
-  }
+  });
 }
 
 function renderMapList() {
   const planetRows = PLANETS.map((planet) => `
     <button class="map-item" type="button" data-planet-name="${escapeHtml(planet.name)}">
       <strong>${escapeHtml(planet.name)}</strong>
-      <span>${planet.atmosphereHeight > 0 ? `${formatDistance(planet.atmosphereHeight)} atmosphere` : "No atmosphere"}</span>
+      <span>Planet focus</span>
     </button>
   `).join("");
-  const routeRows = routePoints.map((point, index) => `
+
+  const routeRows = optimizedStops.map((point, index) => `
     <button class="map-item" type="button" data-route-index="${index}">
-      <strong>${escapeHtml(point.name)}</strong>
-      <span>Route waypoint ${index + 1}</span>
+      <strong>${index + 1}. ${escapeHtml(point.name)}</strong>
+      <span>${index === 0 ? "Start" : `Stop ${index}`}</span>
     </button>
   `).join("");
+
   elements.mapList.innerHTML = planetRows + routeRows;
 }
 
-function calculateRoute(event) {
+function renderOptimizedRoute() {
+  if (!optimizedStops.length) {
+    elements.resultList.innerHTML = `<div class="empty">No route calculated yet.</div>`;
+    return;
+  }
+
+  elements.resultList.innerHTML = optimizedStops.map((point, index) => {
+    const legDistance = index === 0 ? 0 : distance3d(optimizedStops[index - 1], point);
+    return `
+      <article class="atlas-point-card" data-route-card="${index}">
+        <div>
+          <h3>${index + 1}. ${escapeHtml(point.name)}</h3>
+          <div class="gps-line">${escapeHtml(point.rawText)}</div>
+          <div class="meta">
+            <span class="pill">${index === 0 ? "Start" : `Leg ${formatDistance(legDistance)}`}</span>
+            ${point.originalName ? `<span class="pill">Matched ${escapeHtml(point.originalName)} within ${formatDistance(point.matchedDistance)}</span>` : ""}
+            ${point.orbitalCoordinate ? `<span class="pill">Orbital coordinate available</span>` : ""}
+          </div>
+          ${point.orbitalCoordinate ? `
+            <div class="gps-line">${escapeHtml(point.orbitalCoordinate.rawText)}</div>
+            <div class="meta">
+              <span class="pill">${escapeHtml(point.orbitalCoordinate.planet)} orbit</span>
+              <span class="pill">Surface transfer ${formatDistance(point.orbitalCoordinate.transferDistance)}</span>
+            </div>
+          ` : ""}
+        </div>
+        <div class="route-card-actions">
+          <button class="copy-button" type="button" data-copy-route-point="${index}">Copy</button>
+          ${point.orbitalCoordinate ? `<button class="copy-button secondary" type="button" data-copy-orbital-point="${index}">Copy Orbit</button>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function optimizeFromForm(event) {
   event.preventDefault();
-
   try {
-    const lines = splitGpsInput(elements.routeInput.value);
-    routePoints = lines.map(parseGps);
-    if (routePoints.length < 2) {
-      throw new Error("Paste at least two GPS coordinates.");
-    }
-
+    await stationLoadPromise;
+    originalStops = splitGpsInput(elements.input.value).map((line) => applyKnownStationName(parseGps(line)));
+    if (originalStops.length < 2) throw new Error("Paste at least two GPS coordinates.");
     const velocity = Number(elements.velocityInput.value);
-    if (!Number.isFinite(velocity) || velocity <= 0) {
-      throw new Error("Velocity must be greater than 0 m/s.");
-    }
+    if (!Number.isFinite(velocity) || velocity <= 0) throw new Error("Velocity must be greater than 0 m/s.");
 
-    let distance = 0;
-    for (let index = 1; index < routePoints.length; index += 1) {
-      distance += distance3d(routePoints[index - 1], routePoints[index]);
-    }
-
+    optimizedStops = optimizeRoute(originalStops);
+    const distance = routeDistance(optimizedStops);
     const multiplier = Number(elements.tripModeInput.value);
     const totalDistance = distance * multiplier;
-    const seconds = totalDistance / velocity;
-    drawRoute(routePoints);
+    const originalDistance = routeDistance(originalStops);
+    const renamedCount = originalStops.filter((stop) => stop.originalName).length;
+    const orbitalCount = originalStops.filter((stop) => stop.orbitalCoordinate).length;
+    drawRoute(optimizedStops);
     renderMapList();
+    renderOptimizedRoute();
 
-    elements.routeSummary.innerHTML = `
-      <strong>${routePoints.length} waypoints</strong><br>
-      One-way distance: ${formatDistance(distance)}<br>
+    elements.summary.innerHTML = `
+      <strong>${optimizedStops.length} stops</strong><br>
+      Optimized one-way distance: ${formatDistance(distance)}<br>
+      ${originalStops.length > 2 ? `Saved vs pasted order: ${formatDistance(Math.max(0, originalDistance - distance))}<br>` : ""}
+      ${renamedCount ? `${renamedCount} stop${renamedCount === 1 ? "" : "s"} renamed from nearby known station matches<br>` : ""}
+      ${orbitalCount ? `${orbitalCount} surface station orbital coordinate${orbitalCount === 1 ? "" : "s"} provided<br>` : ""}
       ${multiplier === 2 ? `Two-way distance: ${formatDistance(totalDistance)}<br>` : ""}
-      Travel time at ${velocity.toLocaleString()} m/s: ${formatDuration(seconds)}
+      Travel time at ${velocity.toLocaleString()} m/s: ${formatDuration(totalDistance / velocity)}
     `;
   } catch (error) {
-    elements.routeSummary.textContent = error.message;
+    elements.summary.textContent = error.message;
   }
 }
 
 function clearRoute() {
-  routePoints = [];
-  elements.routeInput.value = "";
-  elements.routeSummary.textContent = "Paste two or more GPS coordinates to calculate travel time.";
+  originalStops = [];
+  optimizedStops = [];
+  elements.input.value = "";
+  elements.summary.textContent = "Paste two or more GPS coordinates.";
   drawRoute([]);
   renderMapList();
+  renderOptimizedRoute();
 }
 
 async function copyToClipboard(text) {
   if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through for embedded browser clipboard restrictions.
+    }
   }
-
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.setAttribute("readonly", "");
@@ -796,18 +849,21 @@ async function copyToClipboard(text) {
   textarea.remove();
 }
 
-elements.routeForm.addEventListener("submit", calculateRoute);
-elements.clearRouteButton.addEventListener("click", clearRoute);
+elements.form.addEventListener("submit", optimizeFromForm);
+elements.clearButton.addEventListener("click", clearRoute);
 elements.resetMapButton.addEventListener("click", resetMapView);
-elements.planetFilter.addEventListener("change", renderAtlasPoints);
-elements.directionFilter.addEventListener("change", renderAtlasPoints);
-elements.copyAllButton.addEventListener("click", async () => {
-  await copyToClipboard(filteredAtlasPoints().map((point) => point.rawText).join("\n"));
+elements.copyButton.addEventListener("click", async () => {
+  if (!optimizedStops.length) return;
+  await copyToClipboard(optimizedStops.map((point) => point.rawText).join("\n"));
+  elements.copyButton.textContent = "Copied";
+  setTimeout(() => {
+    elements.copyButton.textContent = "Copy Route";
+  }, 1200);
 });
-elements.pointList.addEventListener("click", async (event) => {
-  const copyButton = event.target.closest("[data-copy-point]");
+elements.resultList.addEventListener("click", async (event) => {
+  const copyButton = event.target.closest("[data-copy-route-point]");
   if (copyButton) {
-    const point = atlasPoints.find((item) => item.id === copyButton.dataset.copyPoint);
+    const point = optimizedStops[Number(copyButton.dataset.copyRoutePoint)];
     if (!point) return;
     await copyToClipboard(point.rawText);
     copyButton.textContent = "Copied";
@@ -817,10 +873,23 @@ elements.pointList.addEventListener("click", async (event) => {
     return;
   }
 
-  const card = event.target.closest("[data-atlas-point-card]");
-  if (!card) return;
-  const point = atlasPoints.find((item) => item.id === card.dataset.atlasPointCard);
-  if (point) selectAtlasPoint(point);
+  const orbitalButton = event.target.closest("[data-copy-orbital-point]");
+  if (orbitalButton) {
+    const point = optimizedStops[Number(orbitalButton.dataset.copyOrbitalPoint)];
+    if (!point?.orbitalCoordinate) return;
+    await copyToClipboard(point.orbitalCoordinate.rawText);
+    orbitalButton.textContent = "Copied";
+    setTimeout(() => {
+      orbitalButton.textContent = "Copy Orbit";
+    }, 1200);
+    return;
+  }
+
+  const card = event.target.closest("[data-route-card]");
+  if (card) {
+    const point = optimizedStops[Number(card.dataset.routeCard)];
+    if (point) focusPoint(point);
+  }
 });
 elements.mapList.addEventListener("click", (event) => {
   const planetButton = event.target.closest("[data-planet-name]");
@@ -829,16 +898,16 @@ elements.mapList.addEventListener("click", (event) => {
     if (planet) focusPlanet(planet);
     return;
   }
-
   const routeButton = event.target.closest("[data-route-index]");
   if (routeButton) {
-    const point = routePoints[Number(routeButton.dataset.routeIndex)];
+    const point = optimizedStops[Number(routeButton.dataset.routeIndex)];
     if (point) focusPoint(point);
   }
 });
 
-buildAtlasPoints();
-populateFilters();
+stationLoadPromise = loadKnownStations().catch((error) => {
+  elements.summary.textContent = `Station lookup unavailable: ${error.message}`;
+});
+
 initMap();
-renderAtlasPoints();
 renderMapList();

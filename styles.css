@@ -466,6 +466,13 @@ button.copied {
   font-size: 0.98rem;
 }
 
+.route-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .map-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 0.32fr);
@@ -480,6 +487,8 @@ button.copied {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #05080d;
+  touch-action: none;
+  user-select: none;
 }
 
 .station-detail-map {

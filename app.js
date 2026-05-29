@@ -1364,7 +1364,9 @@ function bindMapControls() {
 
   viewport.addEventListener("pointerdown", (event) => {
     if (!mapState) return;
+    event.preventDefault();
     if (mapState.hoverLabel) mapState.hoverLabel.hidden = true;
+    mapState.pointerButton = event.button;
     mapState.dragging = true;
     mapState.movedDuringDrag = false;
     mapState.lastX = event.clientX;
@@ -1377,6 +1379,7 @@ function bindMapControls() {
       updateStationHoverLabel(event);
       return;
     }
+    event.preventDefault();
     const dx = event.clientX - mapState.lastX;
     const dy = event.clientY - mapState.lastY;
     mapState.lastX = event.clientX;
@@ -1392,10 +1395,26 @@ function bindMapControls() {
   viewport.addEventListener("pointerup", (event) => {
     if (!mapState) return;
     if (!mapState.movedDuringDrag) {
-      focusMapObjectFromPointer(event);
+      focusMapObjectFromPointer(event, { openStations: mapState.pointerButton !== 2 });
     }
     mapState.dragging = false;
     viewport.releasePointerCapture(event.pointerId);
+  });
+
+  viewport.addEventListener("pointercancel", () => {
+    if (!mapState) return;
+    mapState.dragging = false;
+  });
+
+  viewport.addEventListener("lostpointercapture", () => {
+    if (!mapState) return;
+    mapState.dragging = false;
+  });
+
+  viewport.addEventListener("contextmenu", (event) => {
+    if (!mapState) return;
+    event.preventDefault();
+    focusMapObjectFromPointer(event, { openStations: false });
   });
 
   viewport.addEventListener("wheel", (event) => {
@@ -1443,8 +1462,9 @@ function updateStationHoverLabel(event) {
   mapState.hoverLabel.style.top = `${event.clientY - rect.top + 14}px`;
 }
 
-function focusMapObjectFromPointer(event) {
+function focusMapObjectFromPointer(event, options = {}) {
   if (!mapState) return;
+  const { openStations = true } = options;
 
   const rect = elements.mapViewport.getBoundingClientRect();
   mapState.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1455,7 +1475,10 @@ function focusMapObjectFromPointer(event) {
   const stationHit = stationHits.find((hit) => hit.object.userData?.type === "station");
   if (stationHit) {
     const record = coordinates.find((item) => item.id === stationHit.object.userData.recordId);
-    if (record) openStationWindow(record.id);
+    if (record) {
+      if (openStations) openStationWindow(record.id);
+      else focusStation(record);
+    }
     return;
   }
 
